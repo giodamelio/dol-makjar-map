@@ -64,15 +64,20 @@ body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; back
 }
 .result-item.is-district { font-weight: bold; color: #8af; }
 
-/* Place label tooltip */
-.place-tooltip {
-  background: rgba(20, 20, 20, 0.85) !important; color: #fff !important;
-  padding: 6px 14px !important; border-radius: 6px !important;
-  font-size: 18px !important; white-space: nowrap !important;
-  font-family: system-ui, sans-serif !important;
-  border: none !important; box-shadow: 0 2px 12px rgba(0,0,0,0.5) !important;
+/* Place popup */
+.place-popup .leaflet-popup-content-wrapper {
+  background: rgba(20, 20, 20, 0.9); color: #fff;
+  border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+  font-family: system-ui, sans-serif;
 }
-.place-tooltip::before { display: none !important; }
+.place-popup .leaflet-popup-content {
+  margin: 10px 14px; font-size: 16px;
+}
+.place-popup .leaflet-popup-content h3 { margin: 0 0 4px; font-size: 16px; }
+.place-popup .leaflet-popup-content .popup-district { font-size: 12px; color: #999; }
+.place-popup .leaflet-popup-tip { border-top-color: rgba(20, 20, 20, 0.9); }
+.place-popup .leaflet-popup-close-button { color: #888 !important; }
+.place-popup .leaflet-popup-close-button:hover { color: #fff !important; }
 </style>
 </head>
 <body>
@@ -119,7 +124,7 @@ function polyToLatLngs(polygon) {
 // Layers for highlights
 const districtPolys = {};
 const placeMarkers = {};
-const placeLabels = {};
+let activePopup = null;
 const searchInput = document.getElementById('search-input');
 const resultsEl = document.getElementById('results');
 const selectionEl = document.getElementById('selection');
@@ -165,15 +170,6 @@ function buildOverlays() {
       }).addTo(map);
       placeMarkers[p.id] = circle;
 
-      // Tooltip bound to the circle, shown on highlight
-      circle.bindTooltip(p.name, {
-        permanent: true,
-        direction: 'bottom',
-        offset: [0, 30],
-        className: 'place-tooltip',
-        opacity: 0
-      });
-      placeLabels[p.id] = circle.getTooltip();
     });
   });
 }
@@ -185,26 +181,45 @@ function clearHighlights() {
   Object.values(placeMarkers).forEach(c => {
     c.setStyle({ opacity: 0, fillOpacity: 0 });
   });
-  Object.values(placeLabels).forEach(t => {
-    t.setOpacity(0);
-  });
+  if (activePopup) {
+    map.closePopup(activePopup);
+    activePopup = null;
+  }
 }
 
 function highlightDistrict(di) {
   clearHighlights();
+  const d = data.districts[di];
   if (districtPolys[di]) {
     districtPolys[di].setStyle({ opacity: 1, fillOpacity: 0.25 });
   }
+  if (d.polygon) {
+    // Position popup above the top of the polygon so it doesn't obscure the district
+    let minY = Infinity;
+    let midX = 0;
+    d.polygon.forEach(([x, y]) => {
+      midX += x;
+      if (y < minY) minY = y;
+    });
+    midX /= d.polygon.length;
+    activePopup = L.popup({ className: 'place-popup', closeButton: false, autoPan: false })
+      .setLatLng(toLatLng(midX, minY))
+      .setContent(`<h3>${d.name}</h3><div class="popup-district">${d.places.length} locations</div>`)
+      .openOn(map);
+  }
 }
 
-function highlightPlace(place) {
+function highlightPlace(place, district) {
   clearHighlights();
   if (placeMarkers[place.id]) {
     placeMarkers[place.id].setStyle({ opacity: 1, fillOpacity: 0.35 });
   }
-  if (placeLabels[place.id]) {
-    placeLabels[place.id].setOpacity(0.9);
-  }
+  const latlng = toLatLng(place.x, place.y);
+  const districtName = district ? district.name : '';
+  activePopup = L.popup({ className: 'place-popup', closeButton: false, autoPan: false, offset: [0, -10] })
+    .setLatLng(latlng)
+    .setContent(`<h3>${place.name}</h3><div class="popup-district">${districtName}</div>`)
+    .openOn(map);
 }
 
 // Target zoom: show roughly 800px of map-space on screen, regardless of screen size.
@@ -241,21 +256,23 @@ function panToDistrict(district) {
 // Selection state
 let currentSelection = null; // { type, place?, district, di }
 
+function showSelectionHighlight() {
+  if (!currentSelection) return;
+  if (currentSelection.type === 'district') highlightDistrict(currentSelection.di);
+  else highlightPlace(currentSelection.place, currentSelection.district);
+}
+
 function selectItem(item, fly) {
   currentSelection = item;
   clearHighlights();
 
   if (item.type === 'district') {
-    highlightDistrict(item.di);
     selectionEl.innerHTML = `<div><span class="sel-type">${item.district.name}</span></div><button class="sel-close">&times;</button>`;
     window.location.hash = `district/${encodeURIComponent(item.district.name.toLowerCase().replace(/\s+/g, '-'))}`;
-    if (fly) panToDistrict(item.district);
   } else {
-    highlightPlace(item.place);
     selectionEl.innerHTML = `<div><span class="sel-name">${item.place.id}. ${item.place.name}</span><span class="sel-district">${item.district.name}</span></div><button class="sel-close">&times;</button>`;
     const placeSlug = item.place.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
     window.location.hash = `place/${item.place.id}/${placeSlug}`;
-    if (fly) panToPlace(item.place.x, item.place.y);
   }
 
   selectionEl.style.display = 'flex';
@@ -263,6 +280,21 @@ function selectItem(item, fly) {
   resultsEl.classList.remove('open');
   searchInput.value = '';
   searchInput.blur();
+
+  if (fly) {
+    // Show circle/polygon highlight but no popup during fly
+    if (item.type === 'district') {
+      if (districtPolys[item.di]) districtPolys[item.di].setStyle({ opacity: 1, fillOpacity: 0.25 });
+    } else {
+      if (placeMarkers[item.place.id]) placeMarkers[item.place.id].setStyle({ opacity: 1, fillOpacity: 0.35 });
+    }
+    // Open popup after fly completes
+    map.once('moveend', showSelectionHighlight);
+    if (item.type === 'district') panToDistrict(item.district);
+    else panToPlace(item.place.x, item.place.y);
+  } else {
+    showSelectionHighlight();
+  }
 }
 
 function clearSelection() {
@@ -335,7 +367,7 @@ function doSearch(query) {
       el.addEventListener('click', () => selectItem(item, true));
     } else {
       el.innerHTML = `<span style="color:#888;margin-right:4px">${item.place.id}.</span>${item.place.name}<span class="district-tag">${item.district.name}</span>`;
-      el.addEventListener('mouseenter', () => highlightPlace(item.place));
+      el.addEventListener('mouseenter', () => highlightPlace(item.place, item.district));
       el.addEventListener('click', () => selectItem(item, true));
     }
     resultsEl.appendChild(el);
@@ -351,7 +383,7 @@ resultsEl.addEventListener('mouseleave', () => {
   clearHighlights();
   if (currentSelection) {
     if (currentSelection.type === 'district') highlightDistrict(currentSelection.di);
-    else highlightPlace(currentSelection.place);
+    else highlightPlace(currentSelection.place, currentSelection.district);
   }
 });
 
@@ -363,7 +395,7 @@ document.addEventListener('mousedown', (e) => {
     if (currentSelection) {
       clearHighlights();
       if (currentSelection.type === 'district') highlightDistrict(currentSelection.di);
-      else highlightPlace(currentSelection.place);
+      else highlightPlace(currentSelection.place, currentSelection.district);
     } else {
       clearHighlights();
     }
