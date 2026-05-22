@@ -37,8 +37,21 @@ body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; back
 #search-input:focus { border-color: #88aaff; }
 #search-input::placeholder { color: #666; }
 
+#selection {
+  padding: 10px 16px; border-bottom: 1px solid #333;
+  display: flex; align-items: center; justify-content: space-between;
+}
+#selection .sel-name { font-size: 14px; font-weight: 500; }
+#selection .sel-district { font-size: 11px; color: #888; margin-left: 6px; }
+#selection .sel-type { font-size: 11px; color: #8af; font-weight: bold; }
+#selection .sel-close {
+  background: none; border: none; color: #888; cursor: pointer;
+  font-size: 18px; padding: 0 4px; line-height: 1;
+}
+#selection .sel-close:hover { color: #fff; }
+
 #results {
-  overflow-y: auto; max-height: calc(100vh - 140px); display: none;
+  overflow-y: auto; max-height: calc(100vh - 190px); display: none;
 }
 #results.open { display: block; }
 
@@ -69,6 +82,7 @@ body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; back
     <h1>Dol-Makjar</h1>
     <input id="search-input" type="text" placeholder="Search places and districts..." autocomplete="off">
   </div>
+  <div id="selection" style="display:none"></div>
   <div id="results"></div>
 </div>
 
@@ -108,10 +122,14 @@ const placeMarkers = {};
 const placeLabels = {};
 const searchInput = document.getElementById('search-input');
 const resultsEl = document.getElementById('results');
+const selectionEl = document.getElementById('selection');
 
 fetch('places.json').then(r => r.json()).then(d => {
   data = d;
   buildOverlays();
+  // Check URL hash for initial selection
+  const hashItem = resolveHash();
+  if (hashItem) selectItem(hashItem, true);
 });
 
 function buildOverlays() {
@@ -220,6 +238,67 @@ function panToDistrict(district) {
   }
 }
 
+// Selection state
+let currentSelection = null; // { type, place?, district, di }
+
+function selectItem(item, fly) {
+  currentSelection = item;
+  clearHighlights();
+
+  if (item.type === 'district') {
+    highlightDistrict(item.di);
+    selectionEl.innerHTML = `<div><span class="sel-type">${item.district.name}</span></div><button class="sel-close">&times;</button>`;
+    window.location.hash = `district/${encodeURIComponent(item.district.name.toLowerCase().replace(/\s+/g, '-'))}`;
+    if (fly) panToDistrict(item.district);
+  } else {
+    highlightPlace(item.place);
+    selectionEl.innerHTML = `<div><span class="sel-name">${item.place.id}. ${item.place.name}</span><span class="sel-district">${item.district.name}</span></div><button class="sel-close">&times;</button>`;
+    const placeSlug = item.place.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    window.location.hash = `place/${item.place.id}/${placeSlug}`;
+    if (fly) panToPlace(item.place.x, item.place.y);
+  }
+
+  selectionEl.style.display = 'flex';
+  selectionEl.querySelector('.sel-close').addEventListener('click', clearSelection);
+  resultsEl.classList.remove('open');
+  searchInput.value = '';
+  searchInput.blur();
+}
+
+function clearSelection() {
+  currentSelection = null;
+  clearHighlights();
+  selectionEl.style.display = 'none';
+  selectionEl.innerHTML = '';
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+}
+
+// Resolve hash to a selection item
+function resolveHash() {
+  if (!data) return null;
+  const hash = decodeURIComponent(window.location.hash.slice(1));
+  if (!hash) return null;
+
+  const [type, value] = hash.split('/');
+  if (type === 'place') {
+    const id = parseInt(value, 10);
+    for (let di = 0; di < data.districts.length; di++) {
+      const d = data.districts[di];
+      const p = d.places.find(p => p.id === id);
+      if (p) return { type: 'place', place: p, district: d, di };
+    }
+  } else if (type === 'district') {
+    const slug = value.toLowerCase();
+    for (let di = 0; di < data.districts.length; di++) {
+      const d = data.districts[di];
+      if (d.name.toLowerCase().replace(/\s+/g, '-') === slug) {
+        return { type: 'district', district: d, di };
+      }
+    }
+  }
+  return null;
+}
+
 // Search
 function doSearch(query) {
   if (!data || !query.trim()) {
@@ -253,11 +332,11 @@ function doSearch(query) {
       el.classList.add('is-district');
       el.textContent = item.district.name;
       el.addEventListener('mouseenter', () => highlightDistrict(item.di));
-      el.addEventListener('click', () => panToDistrict(item.district));
+      el.addEventListener('click', () => selectItem(item, true));
     } else {
       el.innerHTML = `<span style="color:#888;margin-right:4px">${item.place.id}.</span>${item.place.name}<span class="district-tag">${item.district.name}</span>`;
       el.addEventListener('mouseenter', () => highlightPlace(item.place));
-      el.addEventListener('click', () => panToPlace(item.place.x, item.place.y));
+      el.addEventListener('click', () => selectItem(item, true));
     }
     resultsEl.appendChild(el);
   });
@@ -267,13 +346,27 @@ function doSearch(query) {
 
 searchInput.addEventListener('input', (e) => doSearch(e.target.value));
 searchInput.addEventListener('focus', () => { if (searchInput.value.trim()) doSearch(searchInput.value); });
-resultsEl.addEventListener('mouseleave', clearHighlights);
+resultsEl.addEventListener('mouseleave', () => {
+  // Restore selection highlight if exists, otherwise clear
+  clearHighlights();
+  if (currentSelection) {
+    if (currentSelection.type === 'district') highlightDistrict(currentSelection.di);
+    else highlightPlace(currentSelection.place);
+  }
+});
 
-// Close results when clicking outside
+// Close results when clicking outside (but keep selection)
 document.addEventListener('mousedown', (e) => {
   if (!e.target.closest('#panel')) {
     resultsEl.classList.remove('open');
-    clearHighlights();
+    // Restore selection highlight if one exists, otherwise clear
+    if (currentSelection) {
+      clearHighlights();
+      if (currentSelection.type === 'district') highlightDistrict(currentSelection.di);
+      else highlightPlace(currentSelection.place);
+    } else {
+      clearHighlights();
+    }
   }
 });
 
@@ -288,8 +381,16 @@ document.addEventListener('keydown', (e) => {
     searchInput.value = '';
     searchInput.blur();
     resultsEl.classList.remove('open');
-    clearHighlights();
+    clearSelection();
   }
+});
+
+// Handle browser back/forward with hash changes
+window.addEventListener('hashchange', () => {
+  if (!data) return;
+  const item = resolveHash();
+  if (item) selectItem(item, true);
+  else clearSelection();
 });
 </script>
 </body>
