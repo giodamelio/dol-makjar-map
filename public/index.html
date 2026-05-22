@@ -1,589 +1,652 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dol-Makjar</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>
-:root { interpolate-size: allow-keywords; }
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; background: #1a1a1a; color: #ddd; }
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Dol-Makjar</title>
+		<link rel="icon" type="image/png" href="/icon.png">
+		<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+		<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+		<style>
+			:root { interpolate-size: allow-keywords; }
+			* { margin: 0; padding: 0; box-sizing: border-box; }
+			body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; background: #1a1a1a; color: #ddd; }
+			
+			#map { width: 100%; height: 100%; background: #1a1a1a; }
+			
+			/* Remove Leaflet's default UI chrome */
+			.leaflet-control-zoom { display: none; }
+			.leaflet-control-attribution { display: none; }
+			
+			#panel {
+				position: fixed; top: 16px; left: 16px; z-index: 1000;
+				width: 320px;
+				background: rgba(25, 25, 25, 0.95); border: 1px solid #444;
+				border-radius: 10px; backdrop-filter: blur(12px);
+				overflow: hidden;
+				box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+				transition: width 0.25s ease;
+			}
+			#panel.collapsed {
+				width: 44px;
+				cursor: pointer;
+			}
+			#panel-content {
+				width: 320px; /* fixed — never changes, prevents reflow */
+				display: grid; grid-template-rows: auto 1fr; align-content: start;
+				transition: grid-template-rows 0.25s ease;
+			}
+			#panel.collapsed #panel-content {
+				grid-template-rows: auto 0fr;
+			}
+			#panel-collapsible {
+				overflow: hidden;
+				display: flex; flex-direction: column;
+			}
+			#panel-collapsible #search-input {
+				margin: 10px; width: auto;
+			}
+			#panel-header {
+				padding: 14px 16px; border-bottom: 1px solid #333;
+			}
+			#panel-title-row {
+				display: flex; align-items: center; gap: 8px;
+			}
+			#collapse-btn {
+				background: none; border: none; color: #777; cursor: pointer;
+				width: 22px; height: 22px; flex-shrink: 0;
+				border-radius: 4px; display: flex; align-items: center; justify-content: center;
+				transition: color 0.15s ease, background 0.15s ease;
+			}
+			#collapse-btn:hover { color: #ccc; background: rgba(255,255,255,0.08); }
+			#collapse-btn .icon-collapse { display: block; }
+			#collapse-btn .icon-search { display: none; }
+			#panel.collapsed #collapse-btn .icon-collapse { display: none; }
+			#panel.collapsed #collapse-btn .icon-search { display: block; }
+			#panel.collapsed #collapse-btn { color: #bbb; }
+			#panel.collapsed #panel-header { border-bottom: none; padding: 11px; }
+			#panel-title-row h1 {
+				font-size: 16px; font-weight: 600; color: #eee; margin: 0; flex: 1;
+			}
+			#panel-buttons {
+				display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+			}
+			#about-btn {
+				background: none; border: none; color: #777; cursor: pointer;
+				width: 22px; height: 22px; flex-shrink: 0;
+				border-radius: 4px; display: flex; align-items: center; justify-content: center;
+				transition: color 0.15s ease, background 0.15s ease;
+			}
+			#about-btn:hover { color: #ccc; background: rgba(255,255,255,0.08); }
+			#panel.collapsed #about-btn { display: none; }
+			
+			#about-modal-overlay {
+				display: none; position: fixed; inset: 0; z-index: 2000;
+				background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
+				align-items: center; justify-content: center;
+			}
+			#about-modal-overlay.open { display: flex; }
+			#about-modal {
+				background: rgba(25, 25, 25, 0.95); border: 1px solid #444;
+				border-radius: 10px; padding: 24px; max-width: 520px; width: 90%;
+				box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6); color: #ddd;
+			}
+			#about-modal h2 { margin: 0 0 12px; font-size: 18px; color: #eee; }
+			#about-modal p { font-size: 14px; line-height: 1.6; margin: 0 0 12px; }
+			#about-modal p:last-of-type { margin-bottom: 0; }
+			#about-modal a { color: #88aaff; }
+			#about-modal-close {
+				background: none; border: 1px solid #555; color: #ccc; cursor: pointer;
+				padding: 6px 16px; border-radius: 6px; font-size: 13px; float: right;
+				margin-top: 12px; transition: background 0.15s ease;
+			}
+			#about-modal-close:hover { background: rgba(255,255,255,0.08); }
+			
+			#search-input {
+				width: 100%; padding: 8px 12px; background: #2a2a2a; border: 1px solid #555;
+				border-radius: 6px; color: #eee; font-size: 14px; outline: none;
+			}
+			#search-input:focus { border-color: #88aaff; }
+			#search-input::placeholder { color: #666; }
+			
+			#selection {
+				padding: 10px 16px; border-bottom: 1px solid #333;
+				display: flex; align-items: center; justify-content: space-between;
+			}
+			#selection .sel-name { font-size: 14px; font-weight: 500; }
+			#selection .sel-district { font-size: 11px; color: #888; margin-left: 6px; }
+			#selection .sel-type { font-size: 11px; color: #8af; font-weight: bold; }
+			#selection .sel-close {
+				background: none; border: none; color: #888; cursor: pointer;
+				font-size: 18px; padding: 0 4px; line-height: 1;
+			}
+			#selection .sel-close:hover { color: #fff; }
+			
+			#results {
+				overflow-y: auto; max-height: calc(100vh - 190px); display: none;
+			}
+			#results.open { display: block; }
+			
+			.result-item {
+				padding: 8px 16px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #2a2a2a;
+			}
+			.result-item:hover, .result-item.active { background: rgba(80, 130, 255, 0.15); }
+			.result-item .district-tag {
+				font-size: 11px; color: #666; margin-left: 8px;
+			}
+			.result-item.is-district { font-weight: bold; color: #8af; }
+			
+			/* Place popup */
+			.place-popup .leaflet-popup-content-wrapper {
+				background: rgba(20, 20, 20, 0.9); color: #fff;
+				border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+				font-family: system-ui, sans-serif;
+			}
+			.place-popup .leaflet-popup-content {
+				margin: 10px 14px; font-size: 16px;
+			}
+			.place-popup .leaflet-popup-content h3 { margin: 0 0 4px; font-size: 16px; }
+			.place-popup .leaflet-popup-content .popup-district { font-size: 12px; color: #999; }
+			.place-popup .leaflet-popup-tip { border-top-color: rgba(20, 20, 20, 0.9); }
+			.place-popup .leaflet-popup-close-button { color: #888 !important; }
+			.place-popup .leaflet-popup-close-button:hover { color: #fff !important; }
+		</style>
+	</head>
+	<body>
 
-#map { width: 100%; height: 100%; background: #1a1a1a; }
+		<div id="panel">
+			<div id="panel-content">
+				<div id="panel-header">
+					<div id="panel-title-row">
+						<button id="collapse-btn" title="Collapse panel">
+							<!-- Heroicon: chevron-up (outline, 24x24) -->
+							<svg class="icon-collapse" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 15.75l7.5-7.5 7.5 7.5"/></svg>
+							<!-- Heroicon: magnifying-glass (outline, 24x24) -->
+							<svg class="icon-search" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+						</button>
+						<h1>Dol-Makjar</h1>
+						<div id="panel-buttons">
+							<button id="about-btn" title="About">
+								<!-- Heroicon: information-circle (outline, 24x24) -->
+								<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+							</button>
+						</div>
+					</div>
+				</div>
+				<div id="panel-collapsible">
+					<input id="search-input" type="text" placeholder="Search places and districts..." autocomplete="off">
+					<div id="selection" style="display:none"></div>
+					<div id="results"></div>
+				</div>
+			</div>
+		</div>
 
-/* Remove Leaflet's default UI chrome */
-.leaflet-control-zoom { display: none; }
-.leaflet-control-attribution { display: none; }
+		<div id="about-modal-overlay">
+			<div id="about-modal">
+				<h2>About</h2>
+				<p>Made with ❤️ by <a href="https://giodamelio.com" target="_blank" rel="noopener">Giovanni d'Amelio</a>.</p>
+				<p>Source code is available on <a href="https://github.com/giodamelio/dol-makjar-map" target="_blank" rel="noopener">GitHub</a>. I made this quick so don't judge me to hard.</p>
+				<p>The map image and the city of Dol-Makjar are the property of <a href="https://critrole.com" target="_blank" rel="noopener">Critical&nbsp;Role</a>. All rights to the original artwork belong to Critical&nbsp;Role and its creators.</p>
+				<p>Made possible by <a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>, an open-source JavaScript library for displaying interactive maps.</p>
+				<button id="about-modal-close">Close</button>
+			</div>
+		</div>
 
-#panel {
-  position: fixed; top: 16px; left: 16px; z-index: 1000;
-  width: 320px;
-  background: rgba(25, 25, 25, 0.95); border: 1px solid #444;
-  border-radius: 10px; backdrop-filter: blur(12px);
-  overflow: hidden;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
-  transition: width 0.25s ease;
-}
-#panel.collapsed {
-  width: 44px;
-  cursor: pointer;
-}
-#panel-content {
-  width: 320px; /* fixed — never changes, prevents reflow */
-  display: grid; grid-template-rows: auto 1fr; align-content: start;
-  transition: grid-template-rows 0.25s ease;
-}
-#panel.collapsed #panel-content {
-  grid-template-rows: auto 0fr;
-}
-#panel-collapsible {
-  overflow: hidden;
-  display: flex; flex-direction: column;
-}
-#panel-collapsible #search-input {
-  margin: 10px; width: auto;
-}
-#panel-header {
-  padding: 14px 16px; border-bottom: 1px solid #333;
-}
-#panel-title-row {
-  display: flex; align-items: center; gap: 8px;
-}
-#collapse-btn {
-  background: none; border: none; color: #777; cursor: pointer;
-  width: 22px; height: 22px; flex-shrink: 0;
-  border-radius: 4px; display: flex; align-items: center; justify-content: center;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-#collapse-btn:hover { color: #ccc; background: rgba(255,255,255,0.08); }
-#collapse-btn .icon-collapse { display: block; }
-#collapse-btn .icon-search { display: none; }
-#panel.collapsed #collapse-btn .icon-collapse { display: none; }
-#panel.collapsed #collapse-btn .icon-search { display: block; }
-#panel.collapsed #collapse-btn { color: #bbb; }
-#panel.collapsed #panel-header { border-bottom: none; padding: 11px; }
-#panel-title-row h1 {
-  font-size: 16px; font-weight: 600; color: #eee; margin: 0; flex: 1;
-}
-#panel-buttons {
-  display: flex; align-items: center; gap: 4px; flex-shrink: 0;
-}
+		<div id="map"></div>
 
-#search-input {
-  width: 100%; padding: 8px 12px; background: #2a2a2a; border: 1px solid #555;
-  border-radius: 6px; color: #eee; font-size: 14px; outline: none;
-}
-#search-input:focus { border-color: #88aaff; }
-#search-input::placeholder { color: #666; }
-
-#selection {
-  padding: 10px 16px; border-bottom: 1px solid #333;
-  display: flex; align-items: center; justify-content: space-between;
-}
-#selection .sel-name { font-size: 14px; font-weight: 500; }
-#selection .sel-district { font-size: 11px; color: #888; margin-left: 6px; }
-#selection .sel-type { font-size: 11px; color: #8af; font-weight: bold; }
-#selection .sel-close {
-  background: none; border: none; color: #888; cursor: pointer;
-  font-size: 18px; padding: 0 4px; line-height: 1;
-}
-#selection .sel-close:hover { color: #fff; }
-
-#results {
-  overflow-y: auto; max-height: calc(100vh - 190px); display: none;
-}
-#results.open { display: block; }
-
-.result-item {
-  padding: 8px 16px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #2a2a2a;
-}
-.result-item:hover, .result-item.active { background: rgba(80, 130, 255, 0.15); }
-.result-item .district-tag {
-  font-size: 11px; color: #666; margin-left: 8px;
-}
-.result-item.is-district { font-weight: bold; color: #8af; }
-
-/* Place popup */
-.place-popup .leaflet-popup-content-wrapper {
-  background: rgba(20, 20, 20, 0.9); color: #fff;
-  border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.6);
-  font-family: system-ui, sans-serif;
-}
-.place-popup .leaflet-popup-content {
-  margin: 10px 14px; font-size: 16px;
-}
-.place-popup .leaflet-popup-content h3 { margin: 0 0 4px; font-size: 16px; }
-.place-popup .leaflet-popup-content .popup-district { font-size: 12px; color: #999; }
-.place-popup .leaflet-popup-tip { border-top-color: rgba(20, 20, 20, 0.9); }
-.place-popup .leaflet-popup-close-button { color: #888 !important; }
-.place-popup .leaflet-popup-close-button:hover { color: #fff !important; }
-
-</style>
-</head>
-<body>
-
-<div id="panel">
-  <div id="panel-content">
-    <div id="panel-header">
-      <div id="panel-title-row">
-        <button id="collapse-btn" title="Collapse panel">
-          <!-- Heroicon: chevron-up (outline, 24x24) -->
-          <svg class="icon-collapse" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 15.75l7.5-7.5 7.5 7.5"/></svg>
-          <!-- Heroicon: magnifying-glass (outline, 24x24) -->
-          <svg class="icon-search" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
-        </button>
-        <h1>Dol-Makjar</h1>
-        <div id="panel-buttons"></div>
-      </div>
-    </div>
-    <div id="panel-collapsible">
-      <input id="search-input" type="text" placeholder="Search places and districts..." autocomplete="off">
-      <div id="selection" style="display:none"></div>
-      <div id="results"></div>
-    </div>
-  </div>
-</div>
-
-<div id="map"></div>
-
-<script>
-const IMG_W = 3600, IMG_H = 5400;
-let data = null;
-
-// Leaflet map with simple CRS (pixel coordinates)
-const map = L.map('map', {
-  crs: L.CRS.Simple,
-  minZoom: -3,
-  maxZoom: 3,
-  zoomSnap: 0.25,
-  zoomDelta: 0.5,
-  attributionControl: false
-});
-
-const bounds = [[0, 0], [IMG_H, IMG_W]];
-L.imageOverlay('original-map.jpg', bounds).addTo(map);
-map.fitBounds(bounds);
-
-// Convert places.json coords (0-1 fractions) to Leaflet coords
-// Leaflet CRS.Simple uses [y, x] and y is inverted (0 at bottom)
-function toLatLng(x, y) {
-  return [IMG_H * (1 - y), IMG_W * x];
-}
-
-function polyToLatLngs(polygon) {
-  return polygon.map(([x, y]) => toLatLng(x, y));
-}
-
-// Layers for highlights
-const districtPolys = {};
-const placeMarkers = {};
-let activePopup = null;
-const searchInput = document.getElementById('search-input');
-const resultsEl = document.getElementById('results');
-const selectionEl = document.getElementById('selection');
-
-fetch('places.json').then(r => r.json()).then(d => {
-  data = d;
-  buildOverlays();
-  buildLegendOverlays();
-  // Check URL hash for initial selection
-  const hashItem = resolveHash();
-  if (hashItem) selectItem(hashItem, true);
-});
-
-function buildOverlays() {
-  // District polygons — invisible by default
-  data.districts.forEach((d, di) => {
-    if (!d.polygon) return;
-    const poly = L.polygon(polyToLatLngs(d.polygon), {
-      color: 'rgba(80, 180, 255, 0.8)',
-      fillColor: 'rgba(80, 180, 255, 0.25)',
-      weight: 3,
-      opacity: 0,
-      fillOpacity: 0,
-      interactive: false
-    }).addTo(map);
-    districtPolys[di] = poly;
-  });
-
-  // Place markers — circle overlays in map coordinates, hidden by default
-  data.districts.forEach((d, di) => {
-    d.places.forEach(p => {
-      if (p.x === undefined) return;
-      const latlng = toLatLng(p.x, p.y);
-
-      // Highlight circle (map-coordinate radius, scales with zoom)
-      const circle = L.circle(latlng, {
-        radius: 80,
-        color: 'rgba(255,255,255,0.3)',
-        fillColor: 'rgba(255,255,255,0.35)',
-        fillOpacity: 0,
-        opacity: 0,
-        weight: 2,
-        interactive: false
-      }).addTo(map);
-      placeMarkers[p.id] = circle;
-
-    });
-  });
-}
-
-// Legend — clickable regions over the printed legend on the map image
-// Uses coordinate-based hit testing on map mousemove instead of individual SVG
-// rects, which avoids Leaflet SVG renderer clipping/hit-testing issues.
-let activeLegendUnderline = null;
-let currentLegendHover = null;
-
-function clearLegendHover() {
-  if (activeLegendUnderline) {
-    map.removeLayer(activeLegendUnderline);
-    activeLegendUnderline = null;
-  }
-  if (currentLegendHover) {
-    map.getContainer().style.cursor = '';
-    currentLegendHover = null;
-  }
-  clearHighlights();
-  if (currentSelection) showSelectionHighlight();
-}
-
-function legendHitTest(x, y) {
-  if (!data.legend) return null;
-  for (const entry of data.legend) {
-    if (!entry.box) continue;
-    const [x1, y1, x2, y2] = entry.box;
-    if (x >= Math.min(x1, x2) && x <= Math.max(x1, x2) &&
-        y >= Math.min(y1, y2) && y <= Math.max(y1, y2)) return entry;
-  }
-  return null;
-}
-
-function showLegendUnderline(entry) {
-  const [x1, y1, x2, y2] = entry.box;
-  const underlineColor = entry.type === 'district' ? '#b5642a' : '#222';
-  const botY = Math.max(y1, y2);
-  const lat = IMG_H * (1 - botY);
-  activeLegendUnderline = L.polyline([
-    [lat, Math.min(x1, x2) * IMG_W],
-    [lat, Math.max(x1, x2) * IMG_W]
-  ], { color: underlineColor, weight: 2, interactive: false }).addTo(map);
-}
-
-map.on('mousemove', (e) => {
-  const x = e.latlng.lng / IMG_W;
-  const y = 1 - e.latlng.lat / IMG_H;
-  const entry = legendHitTest(x, y);
-
-  if (entry === currentLegendHover) return;
-
-  // Clear previous hover
-  if (currentLegendHover) clearLegendHover();
-
-  if (!entry) return;
-
-  currentLegendHover = entry;
-  map.getContainer().style.cursor = 'pointer';
-  showLegendUnderline(entry);
-  const item = legendEntryToItem(entry);
-  if (item) {
-    if (item.type === 'district') highlightDistrict(item.di);
-    else highlightPlace(item.place, item.district);
-  }
-});
-
-map.on('zoomstart', clearLegendHover);
-
-map.on('click', (e) => {
-  const x = e.latlng.lng / IMG_W;
-  const y = 1 - e.latlng.lat / IMG_H;
-  const entry = legendHitTest(x, y);
-  if (entry) {
-    clearLegendHover();
-    const item = legendEntryToItem(entry);
-    if (item) selectItem(item, true);
-  }
-});
-
-function buildLegendOverlays() {
-  // No-op — legend hover/click is handled by map mousemove/click hit testing above
-}
-
-function legendEntryToItem(entry) {
-  const d = data.districts[entry.di];
-  if (entry.type === 'district') {
-    return { type: 'district', district: d, di: entry.di };
-  }
-  const p = d.places.find(pl => pl.id === entry.id);
-  if (p) return { type: 'place', place: p, district: d, di: entry.di };
-  return null;
-}
-
-function clearHighlights() {
-  Object.values(districtPolys).forEach(p => {
-    p.setStyle({ opacity: 0, fillOpacity: 0 });
-  });
-  Object.values(placeMarkers).forEach(c => {
-    c.setStyle({ opacity: 0, fillOpacity: 0 });
-  });
-  if (activePopup) {
-    map.closePopup(activePopup);
-    activePopup = null;
-  }
-}
-
-function highlightDistrict(di) {
-  clearHighlights();
-  const d = data.districts[di];
-  if (districtPolys[di]) {
-    districtPolys[di].setStyle({ opacity: 1, fillOpacity: 0.25 });
-  }
-  if (d.polygon) {
-    // Position popup above the top of the polygon so it doesn't obscure the district
-    let minY = Infinity;
-    let midX = 0;
-    d.polygon.forEach(([x, y]) => {
-      midX += x;
-      if (y < minY) minY = y;
-    });
-    midX /= d.polygon.length;
-    activePopup = L.popup({ className: 'place-popup', closeButton: false, autoPan: false })
-      .setLatLng(toLatLng(midX, minY))
-      .setContent(`<h3>${d.name}</h3><div class="popup-district">${d.places.length} locations</div>`)
-      .openOn(map);
-  }
-}
-
-function highlightPlace(place, district) {
-  clearHighlights();
-  if (placeMarkers[place.id]) {
-    placeMarkers[place.id].setStyle({ opacity: 1, fillOpacity: 0.35 });
-  }
-  const latlng = toLatLng(place.x, place.y);
-  const districtName = district ? district.name : '';
-  activePopup = L.popup({ className: 'place-popup', closeButton: false, autoPan: false, offset: [0, -10] })
-    .setLatLng(latlng)
-    .setContent(`<h3>${place.name}</h3><div class="popup-district">${districtName}</div>`)
-    .openOn(map);
-}
-
-// Target zoom: show roughly 800px of map-space on screen, regardless of screen size.
-// This means the numbered markers are clearly legible.
-function getTargetZoom() {
-  const size = map.getSize();
-  const smallerDim = Math.min(size.x, size.y);
-  // We want ~800 map-pixels visible across the smaller screen dimension.
-  // In CRS.Simple, zoom 0 = 1:1 pixels. Each zoom level doubles.
-  // targetZoom = log2(smallerDim / 800)
-  return Math.log2(smallerDim / 800);
-}
-
-function flyToPoint(latlng) {
-  const target = getTargetZoom();
-  const zoom = Math.max(map.getZoom(), target);
-  map.flyTo(latlng, zoom, { duration: 0.5 });
-}
-
-function panToPlace(x, y) {
-  flyToPoint(toLatLng(x, y));
-}
-
-function panToDistrict(district) {
-  if (district.polygon) {
-    // Fit the polygon bounds, but don't zoom out further than current
-    const polyBounds = L.polygon(polyToLatLngs(district.polygon)).getBounds();
-    const fitZoom = map.getBoundsZoom(polyBounds.pad(0.3)); // pad 30% for breathing room
-    const zoom = Math.max(map.getZoom(), fitZoom);
-    map.flyToBounds(polyBounds.pad(0.3), { duration: 0.5, maxZoom: zoom });
-  }
-}
-
-// Selection state
-let currentSelection = null; // { type, place?, district, di }
-
-function showSelectionHighlight() {
-  if (!currentSelection) return;
-  if (currentSelection.type === 'district') highlightDistrict(currentSelection.di);
-  else highlightPlace(currentSelection.place, currentSelection.district);
-}
-
-function selectItem(item, fly) {
-  currentSelection = item;
-  clearHighlights();
-
-  if (item.type === 'district') {
-    selectionEl.innerHTML = `<div><span class="sel-type">${item.district.name}</span></div><button class="sel-close">&times;</button>`;
-    window.location.hash = `district/${encodeURIComponent(item.district.name.toLowerCase().replace(/\s+/g, '-'))}`;
-  } else {
-    selectionEl.innerHTML = `<div><span class="sel-name">${item.place.id}. ${item.place.name}</span><span class="sel-district">${item.district.name}</span></div><button class="sel-close">&times;</button>`;
-    const placeSlug = item.place.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    window.location.hash = `place/${item.place.id}/${placeSlug}`;
-  }
-
-  selectionEl.style.display = 'flex';
-  selectionEl.querySelector('.sel-close').addEventListener('click', clearSelection);
-  resultsEl.classList.remove('open');
-  searchInput.value = '';
-  searchInput.blur();
-
-  if (fly) {
-    // Show circle/polygon highlight but no popup during fly
-    if (item.type === 'district') {
-      if (districtPolys[item.di]) districtPolys[item.di].setStyle({ opacity: 1, fillOpacity: 0.25 });
-    } else {
-      if (placeMarkers[item.place.id]) placeMarkers[item.place.id].setStyle({ opacity: 1, fillOpacity: 0.35 });
-    }
-    // Open popup after fly completes
-    map.once('moveend', showSelectionHighlight);
-    if (item.type === 'district') panToDistrict(item.district);
-    else panToPlace(item.place.x, item.place.y);
-  } else {
-    showSelectionHighlight();
-  }
-}
-
-function clearSelection() {
-  currentSelection = null;
-  clearHighlights();
-  selectionEl.style.display = 'none';
-  selectionEl.innerHTML = '';
-  history.replaceState(null, '', window.location.pathname + window.location.search);
-}
-
-// Resolve hash to a selection item
-function resolveHash() {
-  if (!data) return null;
-  const hash = decodeURIComponent(window.location.hash.slice(1));
-  if (!hash) return null;
-
-  const [type, value] = hash.split('/');
-  if (type === 'place') {
-    const id = parseInt(value, 10);
-    for (let di = 0; di < data.districts.length; di++) {
-      const d = data.districts[di];
-      const p = d.places.find(p => p.id === id);
-      if (p) return { type: 'place', place: p, district: d, di };
-    }
-  } else if (type === 'district') {
-    const slug = value.toLowerCase();
-    for (let di = 0; di < data.districts.length; di++) {
-      const d = data.districts[di];
-      if (d.name.toLowerCase().replace(/\s+/g, '-') === slug) {
-        return { type: 'district', district: d, di };
-      }
-    }
-  }
-  return null;
-}
-
-// Search
-function doSearch(query) {
-  if (!data || !query.trim()) {
-    resultsEl.classList.remove('open');
-    return;
-  }
-  const q = query.toLowerCase();
-  const items = [];
-
-  data.districts.forEach((d, di) => {
-    if (d.name.toLowerCase().includes(q)) {
-      items.push({ type: 'district', district: d, di });
-    }
-    d.places.forEach(p => {
-      if (p.name.toLowerCase().includes(q) || String(p.id) === q.trim()) {
-        items.push({ type: 'place', place: p, district: d, di });
-      }
-    });
-  });
-
-  resultsEl.innerHTML = '';
-  if (items.length === 0) {
-    resultsEl.classList.remove('open');
-    return;
-  }
-
-  items.forEach(item => {
-    const el = document.createElement('div');
-    el.className = 'result-item';
-    if (item.type === 'district') {
-      el.classList.add('is-district');
-      el.textContent = item.district.name;
-      el.addEventListener('mouseenter', () => highlightDistrict(item.di));
-      el.addEventListener('click', () => selectItem(item, true));
-    } else {
-      el.innerHTML = `<span style="color:#888;margin-right:4px">${item.place.id}.</span>${item.place.name}<span class="district-tag">${item.district.name}</span>`;
-      el.addEventListener('mouseenter', () => highlightPlace(item.place, item.district));
-      el.addEventListener('click', () => selectItem(item, true));
-    }
-    resultsEl.appendChild(el);
-  });
-
-  resultsEl.classList.add('open');
-}
-
-searchInput.addEventListener('input', (e) => doSearch(e.target.value));
-searchInput.addEventListener('focus', () => { if (searchInput.value.trim()) doSearch(searchInput.value); });
-resultsEl.addEventListener('mouseleave', () => {
-  // Restore selection highlight if exists, otherwise clear
-  clearHighlights();
-  if (currentSelection) {
-    if (currentSelection.type === 'district') highlightDistrict(currentSelection.di);
-    else highlightPlace(currentSelection.place, currentSelection.district);
-  }
-});
-
-// Close results when clicking outside (but keep selection)
-document.addEventListener('mousedown', (e) => {
-  if (!e.target.closest('#panel')) {
-    resultsEl.classList.remove('open');
-    // Restore selection highlight if one exists, otherwise clear
-    if (currentSelection) {
-      clearHighlights();
-      if (currentSelection.type === 'district') highlightDistrict(currentSelection.di);
-      else highlightPlace(currentSelection.place, currentSelection.district);
-    } else {
-      clearHighlights();
-    }
-  }
-});
-
-// Prevent panel interactions from affecting the map (Leaflet utility)
-const panel = document.getElementById('panel');
-L.DomEvent.disableClickPropagation(panel);
-L.DomEvent.disableScrollPropagation(panel);
-
-// Panel collapse/expand
-const collapseBtn = document.getElementById('collapse-btn');
-collapseBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  panel.classList.toggle('collapsed');
-  collapseBtn.title = panel.classList.contains('collapsed') ? 'Expand panel' : 'Collapse panel';
-});
-panel.addEventListener('click', (e) => {
-  if (panel.classList.contains('collapsed')) {
-    panel.classList.remove('collapsed');
-    collapseBtn.title = 'Collapse panel';
-  }
-});
-
-// Keyboard: Escape clears search
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    searchInput.value = '';
-    searchInput.blur();
-    resultsEl.classList.remove('open');
-    clearSelection();
-  }
-});
-
-// Handle browser back/forward with hash changes
-window.addEventListener('hashchange', () => {
-  if (!data) return;
-  const item = resolveHash();
-  if (item) selectItem(item, true);
-  else clearSelection();
-});
-</script>
-</body>
+		<script>
+			const IMG_W = 3600, IMG_H = 5400;
+			let data = null;
+			
+			// Leaflet map with simple CRS (pixel coordinates)
+			const map = L.map('map', {
+				crs: L.CRS.Simple,
+				minZoom: -3,
+				maxZoom: 3,
+				zoomSnap: 0.25,
+				zoomDelta: 0.5,
+				attributionControl: false
+				});
+				
+				const bounds = [[0, 0], [IMG_H, IMG_W]];
+				L.imageOverlay('original-map.jpg', bounds).addTo(map);
+				map.fitBounds(bounds);
+				
+				// Convert places.json coords (0-1 fractions) to Leaflet coords
+				// Leaflet CRS.Simple uses [y, x] and y is inverted (0 at bottom)
+				function toLatLng(x, y) {
+					return [IMG_H * (1 - y), IMG_W * x];
+				}
+				
+				function polyToLatLngs(polygon) {
+					return polygon.map(([x, y]) => toLatLng(x, y));
+				}
+				
+				// Layers for highlights
+				const districtPolys = {};
+				const placeMarkers = {};
+				let activePopup = null;
+				const searchInput = document.getElementById('search-input');
+				const resultsEl = document.getElementById('results');
+				const selectionEl = document.getElementById('selection');
+				
+				fetch('places.json').then(r => r.json()).then(d => {
+					data = d;
+					buildOverlays();
+					buildLegendOverlays();
+					// Check URL hash for initial selection
+					const hashItem = resolveHash();
+					if (hashItem) selectItem(hashItem, true);
+					});
+					
+					function buildOverlays() {
+						// District polygons — invisible by default
+						data.districts.forEach((d, di) => {
+							if (!d.polygon) return;
+							const poly = L.polygon(polyToLatLngs(d.polygon), {
+								color: 'rgba(80, 180, 255, 0.8)',
+								fillColor: 'rgba(80, 180, 255, 0.25)',
+								weight: 3,
+								opacity: 0,
+								fillOpacity: 0,
+								interactive: false
+								}).addTo(map);
+								districtPolys[di] = poly;
+								});
+								
+								// Place markers — circle overlays in map coordinates, hidden by default
+								data.districts.forEach((d, di) => {
+									d.places.forEach(p => {
+										if (p.x === undefined) return;
+										const latlng = toLatLng(p.x, p.y);
+										
+										// Highlight circle (map-coordinate radius, scales with zoom)
+										const circle = L.circle(latlng, {
+											radius: 80,
+											color: 'rgba(255,255,255,0.3)',
+											fillColor: 'rgba(255,255,255,0.35)',
+											fillOpacity: 0,
+											opacity: 0,
+											weight: 2,
+											interactive: false
+											}).addTo(map);
+											placeMarkers[p.id] = circle;
+											
+											});
+											});
+										}
+										
+										// Legend — clickable regions over the printed legend on the map image
+										// Uses coordinate-based hit testing on map mousemove instead of individual SVG
+										// rects, which avoids Leaflet SVG renderer clipping/hit-testing issues.
+										let activeLegendUnderline = null;
+										let currentLegendHover = null;
+										
+										function clearLegendHover() {
+											if (activeLegendUnderline) {
+												map.removeLayer(activeLegendUnderline);
+												activeLegendUnderline = null;
+											}
+											if (currentLegendHover) {
+												map.getContainer().style.cursor = '';
+												currentLegendHover = null;
+											}
+											clearHighlights();
+											if (currentSelection) showSelectionHighlight();
+										}
+										
+										function legendHitTest(x, y) {
+											if (!data.legend) return null;
+											for (const entry of data.legend) {
+												if (!entry.box) continue;
+												const [x1, y1, x2, y2] = entry.box;
+												if (x >= Math.min(x1, x2) && x <= Math.max(x1, x2) &&
+												y >= Math.min(y1, y2) && y <= Math.max(y1, y2)) return entry;
+											}
+											return null;
+										}
+										
+										function showLegendUnderline(entry) {
+											const [x1, y1, x2, y2] = entry.box;
+											const underlineColor = entry.type === 'district' ? '#b5642a' : '#222';
+											const botY = Math.max(y1, y2);
+											const lat = IMG_H * (1 - botY);
+											activeLegendUnderline = L.polyline([
+											[lat, Math.min(x1, x2) * IMG_W],
+											[lat, Math.max(x1, x2) * IMG_W]
+											], { color: underlineColor, weight: 2, interactive: false }).addTo(map);
+										}
+										
+										map.on('mousemove', (e) => {
+											const x = e.latlng.lng / IMG_W;
+											const y = 1 - e.latlng.lat / IMG_H;
+											const entry = legendHitTest(x, y);
+											
+											if (entry === currentLegendHover) return;
+											
+											// Clear previous hover
+											if (currentLegendHover) clearLegendHover();
+											
+											if (!entry) return;
+											
+											currentLegendHover = entry;
+											map.getContainer().style.cursor = 'pointer';
+											showLegendUnderline(entry);
+											const item = legendEntryToItem(entry);
+											if (item) {
+												if (item.type === 'district') highlightDistrict(item.di);
+												else highlightPlace(item.place, item.district);
+											}
+											});
+											
+											map.on('zoomstart', clearLegendHover);
+											
+											map.on('click', (e) => {
+												const x = e.latlng.lng / IMG_W;
+												const y = 1 - e.latlng.lat / IMG_H;
+												const entry = legendHitTest(x, y);
+												if (entry) {
+													clearLegendHover();
+													const item = legendEntryToItem(entry);
+													if (item) selectItem(item, true);
+												}
+												});
+												
+												function buildLegendOverlays() {
+													// No-op — legend hover/click is handled by map mousemove/click hit testing above
+												}
+												
+												function legendEntryToItem(entry) {
+													const d = data.districts[entry.di];
+													if (entry.type === 'district') {
+														return { type: 'district', district: d, di: entry.di };
+													}
+													const p = d.places.find(pl => pl.id === entry.id);
+													if (p) return { type: 'place', place: p, district: d, di: entry.di };
+													return null;
+												}
+												
+												function clearHighlights() {
+													Object.values(districtPolys).forEach(p => {
+														p.setStyle({ opacity: 0, fillOpacity: 0 });
+														});
+														Object.values(placeMarkers).forEach(c => {
+															c.setStyle({ opacity: 0, fillOpacity: 0 });
+															});
+															if (activePopup) {
+																map.closePopup(activePopup);
+																activePopup = null;
+															}
+														}
+														
+														function highlightDistrict(di) {
+															clearHighlights();
+															const d = data.districts[di];
+															if (districtPolys[di]) {
+																districtPolys[di].setStyle({ opacity: 1, fillOpacity: 0.25 });
+															}
+															if (d.polygon) {
+																// Position popup above the top of the polygon so it doesn't obscure the district
+																let minY = Infinity;
+																let midX = 0;
+																d.polygon.forEach(([x, y]) => {
+																	midX += x;
+																	if (y < minY) minY = y;
+																	});
+																	midX /= d.polygon.length;
+																	activePopup = L.popup({ className: 'place-popup', closeButton: false, autoPan: false })
+																	.setLatLng(toLatLng(midX, minY))
+																	.setContent(`<h3>${d.name}</h3><div class="popup-district">${d.places.length} locations</div>`)
+																	.openOn(map);
+																}
+															}
+															
+															function highlightPlace(place, district) {
+																clearHighlights();
+																if (placeMarkers[place.id]) {
+																	placeMarkers[place.id].setStyle({ opacity: 1, fillOpacity: 0.35 });
+																}
+																const latlng = toLatLng(place.x, place.y);
+																const districtName = district ? district.name : '';
+																activePopup = L.popup({ className: 'place-popup', closeButton: false, autoPan: false, offset: [0, -10] })
+																.setLatLng(latlng)
+																.setContent(`<h3>${place.name}</h3><div class="popup-district">${districtName}</div>`)
+																.openOn(map);
+															}
+															
+															// Target zoom: show roughly 800px of map-space on screen, regardless of screen size.
+															// This means the numbered markers are clearly legible.
+															function getTargetZoom() {
+																const size = map.getSize();
+																const smallerDim = Math.min(size.x, size.y);
+																// We want ~800 map-pixels visible across the smaller screen dimension.
+																// In CRS.Simple, zoom 0 = 1:1 pixels. Each zoom level doubles.
+																// targetZoom = log2(smallerDim / 800)
+																return Math.log2(smallerDim / 800);
+															}
+															
+															function flyToPoint(latlng) {
+																const target = getTargetZoom();
+																const zoom = Math.max(map.getZoom(), target);
+																map.flyTo(latlng, zoom, { duration: 0.5 });
+															}
+															
+															function panToPlace(x, y) {
+																flyToPoint(toLatLng(x, y));
+															}
+															
+															function panToDistrict(district) {
+																if (district.polygon) {
+																	// Fit the polygon bounds, but don't zoom out further than current
+																	const polyBounds = L.polygon(polyToLatLngs(district.polygon)).getBounds();
+																	const fitZoom = map.getBoundsZoom(polyBounds.pad(0.3)); // pad 30% for breathing room
+																	const zoom = Math.max(map.getZoom(), fitZoom);
+																	map.flyToBounds(polyBounds.pad(0.3), { duration: 0.5, maxZoom: zoom });
+																}
+															}
+															
+															// Selection state
+															let currentSelection = null; // { type, place?, district, di }
+															
+															function showSelectionHighlight() {
+																if (!currentSelection) return;
+																if (currentSelection.type === 'district') highlightDistrict(currentSelection.di);
+																else highlightPlace(currentSelection.place, currentSelection.district);
+															}
+															
+															function selectItem(item, fly) {
+																currentSelection = item;
+																clearHighlights();
+																
+																if (item.type === 'district') {
+																	selectionEl.innerHTML = `<div><span class="sel-type">${item.district.name}</span></div><button class="sel-close">&times;</button>`;
+																	window.location.hash = `district/${encodeURIComponent(item.district.name.toLowerCase().replace(/\s+/g, '-'))}`;
+																	} else {
+																		selectionEl.innerHTML = `<div><span class="sel-name">${item.place.id}. ${item.place.name}</span><span class="sel-district">${item.district.name}</span></div><button class="sel-close">&times;</button>`;
+																		const placeSlug = item.place.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+																		window.location.hash = `place/${item.place.id}/${placeSlug}`;
+																	}
+																	
+																	selectionEl.style.display = 'flex';
+																	selectionEl.querySelector('.sel-close').addEventListener('click', clearSelection);
+																	resultsEl.classList.remove('open');
+																	searchInput.value = '';
+																	searchInput.blur();
+																	
+																	if (fly) {
+																		// Show circle/polygon highlight but no popup during fly
+																		if (item.type === 'district') {
+																			if (districtPolys[item.di]) districtPolys[item.di].setStyle({ opacity: 1, fillOpacity: 0.25 });
+																			} else {
+																				if (placeMarkers[item.place.id]) placeMarkers[item.place.id].setStyle({ opacity: 1, fillOpacity: 0.35 });
+																			}
+																			// Open popup after fly completes
+																			map.once('moveend', showSelectionHighlight);
+																			if (item.type === 'district') panToDistrict(item.district);
+																			else panToPlace(item.place.x, item.place.y);
+																			} else {
+																				showSelectionHighlight();
+																			}
+																		}
+																		
+																		function clearSelection() {
+																			currentSelection = null;
+																			clearHighlights();
+																			selectionEl.style.display = 'none';
+																			selectionEl.innerHTML = '';
+																			history.replaceState(null, '', window.location.pathname + window.location.search);
+																		}
+																		
+																		// Resolve hash to a selection item
+																		function resolveHash() {
+																			if (!data) return null;
+																			const hash = decodeURIComponent(window.location.hash.slice(1));
+																			if (!hash) return null;
+																			
+																			const [type, value] = hash.split('/');
+																			if (type === 'place') {
+																				const id = parseInt(value, 10);
+																				for (let di = 0; di < data.districts.length; di++) {
+																					const d = data.districts[di];
+																					const p = d.places.find(p => p.id === id);
+																					if (p) return { type: 'place', place: p, district: d, di };
+																				}
+																				} else if (type === 'district') {
+																					const slug = value.toLowerCase();
+																					for (let di = 0; di < data.districts.length; di++) {
+																						const d = data.districts[di];
+																						if (d.name.toLowerCase().replace(/\s+/g, '-') === slug) {
+																							return { type: 'district', district: d, di };
+																						}
+																					}
+																				}
+																				return null;
+																			}
+																			
+																			// Search
+																			function doSearch(query) {
+																				if (!data || !query.trim()) {
+																					resultsEl.classList.remove('open');
+																					return;
+																				}
+																				const q = query.toLowerCase();
+																				const items = [];
+																				
+																				data.districts.forEach((d, di) => {
+																					if (d.name.toLowerCase().includes(q)) {
+																						items.push({ type: 'district', district: d, di });
+																					}
+																					d.places.forEach(p => {
+																						if (p.name.toLowerCase().includes(q) || String(p.id) === q.trim()) {
+																							items.push({ type: 'place', place: p, district: d, di });
+																						}
+																						});
+																						});
+																						
+																						resultsEl.innerHTML = '';
+																						if (items.length === 0) {
+																							resultsEl.classList.remove('open');
+																							return;
+																						}
+																						
+																						items.forEach(item => {
+																							const el = document.createElement('div');
+																							el.className = 'result-item';
+																							if (item.type === 'district') {
+																								el.classList.add('is-district');
+																								el.textContent = item.district.name;
+																								el.addEventListener('mouseenter', () => highlightDistrict(item.di));
+																								el.addEventListener('click', () => selectItem(item, true));
+																								} else {
+																									el.innerHTML = `<span style="color:#888;margin-right:4px">${item.place.id}.</span>${item.place.name}<span class="district-tag">${item.district.name}</span>`;
+																									el.addEventListener('mouseenter', () => highlightPlace(item.place, item.district));
+																									el.addEventListener('click', () => selectItem(item, true));
+																								}
+																								resultsEl.appendChild(el);
+																								});
+																								
+																								resultsEl.classList.add('open');
+																							}
+																							
+																							searchInput.addEventListener('input', (e) => doSearch(e.target.value));
+																							searchInput.addEventListener('focus', () => { if (searchInput.value.trim()) doSearch(searchInput.value); });
+																							resultsEl.addEventListener('mouseleave', () => {
+																								// Restore selection highlight if exists, otherwise clear
+																								clearHighlights();
+																								if (currentSelection) {
+																									if (currentSelection.type === 'district') highlightDistrict(currentSelection.di);
+																									else highlightPlace(currentSelection.place, currentSelection.district);
+																								}
+																								});
+																								
+																								// Close results when clicking outside (but keep selection)
+																								document.addEventListener('mousedown', (e) => {
+																									if (!e.target.closest('#panel')) {
+																										resultsEl.classList.remove('open');
+																										// Restore selection highlight if one exists, otherwise clear
+																										if (currentSelection) {
+																											clearHighlights();
+																											if (currentSelection.type === 'district') highlightDistrict(currentSelection.di);
+																											else highlightPlace(currentSelection.place, currentSelection.district);
+																											} else {
+																												clearHighlights();
+																											}
+																										}
+																										});
+																										
+																										// Prevent panel interactions from affecting the map (Leaflet utility)
+																										const panel = document.getElementById('panel');
+																										L.DomEvent.disableClickPropagation(panel);
+																										L.DomEvent.disableScrollPropagation(panel);
+																										
+																										// Panel collapse/expand
+																										const collapseBtn = document.getElementById('collapse-btn');
+																										collapseBtn.addEventListener('click', (e) => {
+																											e.stopPropagation();
+																											panel.classList.toggle('collapsed');
+																											collapseBtn.title = panel.classList.contains('collapsed') ? 'Expand panel' : 'Collapse panel';
+																											});
+																											panel.addEventListener('click', (e) => {
+																												if (panel.classList.contains('collapsed')) {
+																													panel.classList.remove('collapsed');
+																													collapseBtn.title = 'Collapse panel';
+																												}
+																												});
+																												
+																												// Keyboard: Escape clears search
+																												document.addEventListener('keydown', (e) => {
+																													if (e.key === 'Escape') {
+																														if (aboutOverlay.classList.contains('open')) {
+																															aboutOverlay.classList.remove('open');
+																															return;
+																														}
+																														searchInput.value = '';
+																														searchInput.blur();
+																														resultsEl.classList.remove('open');
+																														clearSelection();
+																													}
+																													});
+																													
+																													// About modal
+																													const aboutBtn = document.getElementById('about-btn');
+																													const aboutOverlay = document.getElementById('about-modal-overlay');
+																													const aboutCloseBtn = document.getElementById('about-modal-close');
+																													aboutBtn.addEventListener('click', (e) => {
+																														e.stopPropagation();
+																														aboutOverlay.classList.add('open');
+																														});
+																														aboutCloseBtn.addEventListener('click', () => aboutOverlay.classList.remove('open'));
+																														aboutOverlay.addEventListener('click', (e) => {
+																															if (e.target === aboutOverlay) aboutOverlay.classList.remove('open');
+																															});
+																															
+																															// Handle browser back/forward with hash changes
+																															window.addEventListener('hashchange', () => {
+																																if (!data) return;
+																																const item = resolveHash();
+																																if (item) selectItem(item, true);
+																																else clearSelection();
+																																});
+		</script>
+	</body>
 </html>
