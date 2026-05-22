@@ -349,7 +349,9 @@
 											}
 											});
 											
-											map.on('zoomstart', clearLegendHover);
+											map.on('zoomstart', () => {
+											if (currentLegendHover) clearLegendHover();
+										});
 											
 											map.on('click', (e) => {
 												const x = e.latlng.lng / IMG_W;
