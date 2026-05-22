@@ -13,6 +13,7 @@
 		<meta name="twitter:title" content="Dol-Makjar · Interactive Map">
 		<meta name="twitter:description" content="Interactive map of the city of Dol-Makjar from Critical Role Campaign 4.">
 		<meta name="twitter:image" content="/icon.png">
+		<link rel="preload" href="/places.json" as="fetch" crossorigin>
 		<link rel="icon" type="image/png" href="/icon.png">
 		<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 		<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -305,7 +306,6 @@
 										}
 										
 										function legendHitTest(x, y) {
-											if (!data.legend) return null;
 											if (!data || !data.legend) return null;
 											for (const entry of data.legend) {
 												if (!entry.box) continue;
