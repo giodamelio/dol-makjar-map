@@ -215,7 +215,7 @@ function doSearch(query) {
       items.push({ type: 'district', district: d, di });
     }
     d.places.forEach(p => {
-      if (p.name.toLowerCase().includes(q)) {
+      if (p.name.toLowerCase().includes(q) || String(p.id) === q.trim()) {
         items.push({ type: 'place', place: p, district: d, di });
       }
     });
@@ -236,7 +236,7 @@ function doSearch(query) {
       el.addEventListener('mouseenter', () => highlightDistrict(item.di));
       el.addEventListener('click', () => panToDistrict(item.district));
     } else {
-      el.innerHTML = item.place.name + `<span class="district-tag">${item.district.name}</span>`;
+      el.innerHTML = `<span style="color:#888;margin-right:4px">${item.place.id}.</span>${item.place.name}<span class="district-tag">${item.district.name}</span>`;
       el.addEventListener('mouseenter', () => highlightPlace(item.place));
       el.addEventListener('click', () => panToPlace(item.place.x, item.place.y));
     }
