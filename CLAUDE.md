@@ -69,9 +69,7 @@ This project uses **jj (Jujutsu)**, not git. Use `jj` commands for commits and h
 
 ## Development
 
-```
-python3 -m http.server 8080
-```
+The user runs the dev server themselves in a separate tab. **Do not start a dev server.**
 
 - `/` — Map viewer
 - `/calibrate.html` — Coordinate editing tool
