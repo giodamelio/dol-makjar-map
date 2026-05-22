@@ -4,12 +4,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dol-Makjar</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; background: #1a1a1a; color: #ddd; touch-action: none; }
+body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; background: #1a1a1a; color: #ddd; }
+
+#map { width: 100%; height: 100%; background: #1a1a1a; }
+
+/* Remove Leaflet's default UI chrome */
+.leaflet-control-zoom { display: none; }
+.leaflet-control-attribution { display: none; }
 
 #panel {
-  position: fixed; top: 16px; left: 16px; z-index: 10;
+  position: fixed; top: 16px; left: 16px; z-index: 1000;
   width: 320px; max-height: calc(100vh - 32px);
   background: rgba(25, 25, 25, 0.95); border: 1px solid #444;
   border-radius: 10px; backdrop-filter: blur(12px);
@@ -43,43 +51,15 @@ body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; back
 }
 .result-item.is-district { font-weight: bold; color: #8af; }
 
-#map-container {
-  width: 100%; height: 100%; overflow: hidden; cursor: grab; position: relative;
+/* Place label tooltip */
+.place-tooltip {
+  background: rgba(20, 20, 20, 0.85) !important; color: #fff !important;
+  padding: 6px 14px !important; border-radius: 6px !important;
+  font-size: 18px !important; white-space: nowrap !important;
+  font-family: system-ui, sans-serif !important;
+  border: none !important; box-shadow: 0 2px 12px rgba(0,0,0,0.5) !important;
 }
-#map-container.dragging { cursor: grabbing; }
-
-#map-wrapper {
-  position: absolute; transform-origin: 0 0;
-}
-#map-img { display: block; }
-
-svg#overlay {
-  position: absolute; top: 0; left: 0; pointer-events: none;
-}
-svg#overlay polygon { fill: transparent; stroke: transparent; stroke-width: 0; transition: fill 0.2s, stroke 0.2s; }
-svg#overlay polygon.highlight { fill: rgba(80, 180, 255, 0.25); stroke: rgba(80, 180, 255, 0.8); stroke-width: 3; }
-
-.place-marker {
-  position: absolute; border-radius: 50%;
-  transform: translate(-50%, -50%); pointer-events: none;
-  transition: all 0.3s ease;
-  width: 24px; height: 24px;
-  background: transparent; border: 3px solid transparent;
-  box-shadow: none;
-}
-.place-marker.highlight {
-  width: 200px; height: 200px;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.15) 40%, rgba(255, 255, 255, 0) 70%);
-  border: 2px solid rgba(255, 255, 255, 0.3);
-}
-
-.place-label {
-  position: absolute; transform: translate(-50%, 80px);
-  background: rgba(20, 20, 20, 0.85); color: #fff; padding: 6px 14px;
-  border-radius: 6px; font-size: 24px; white-space: nowrap;
-  pointer-events: none; opacity: 0; transition: opacity 0.2s;
-}
-.place-label.visible { opacity: 1; }
+.place-tooltip::before { display: none !important; }
 </style>
 </head>
 <body>
@@ -92,96 +72,133 @@ svg#overlay polygon.highlight { fill: rgba(80, 180, 255, 0.25); stroke: rgba(80,
   <div id="results"></div>
 </div>
 
-<div id="map-container">
-  <div id="map-wrapper">
-    <img id="map-img" src="original-map.jpg" draggable="false">
-    <svg id="overlay"></svg>
-  </div>
-</div>
+<div id="map"></div>
 
 <script>
 const IMG_W = 3600, IMG_H = 5400;
 let data = null;
-let scale = 1, panX = 0, panY = 0;
-let isDragging = false, dragStartX, dragStartY, panStartX, panStartY;
 
-const container = document.getElementById('map-container');
-const wrapper = document.getElementById('map-wrapper');
-const img = document.getElementById('map-img');
-const overlay = document.getElementById('overlay');
+// Leaflet map with simple CRS (pixel coordinates)
+const map = L.map('map', {
+  crs: L.CRS.Simple,
+  minZoom: -3,
+  maxZoom: 3,
+  zoomSnap: 0.25,
+  zoomDelta: 0.5,
+  attributionControl: false
+});
+
+const bounds = [[0, 0], [IMG_H, IMG_W]];
+L.imageOverlay('original-map.jpg', bounds).addTo(map);
+map.fitBounds(bounds);
+
+// Convert places.json coords (0-1 fractions) to Leaflet coords
+// Leaflet CRS.Simple uses [y, x] and y is inverted (0 at bottom)
+function toLatLng(x, y) {
+  return [IMG_H * (1 - y), IMG_W * x];
+}
+
+function polyToLatLngs(polygon) {
+  return polygon.map(([x, y]) => toLatLng(x, y));
+}
+
+// Layers for highlights
+const districtPolys = {};
+const placeMarkers = {};
+const placeLabels = {};
 const searchInput = document.getElementById('search-input');
 const resultsEl = document.getElementById('results');
 
-// Markers and labels (keyed by place id)
-const markers = {};
-const labels = {};
-// District polygons (keyed by district index)
-const districtPolys = {};
-
 fetch('places.json').then(r => r.json()).then(d => {
   data = d;
-  overlay.setAttribute('width', IMG_W);
-  overlay.setAttribute('height', IMG_H);
   buildOverlays();
 });
 
 function buildOverlays() {
-  // District polygons
+  // District polygons — invisible by default
   data.districts.forEach((d, di) => {
     if (!d.polygon) return;
-    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-    const pts = d.polygon.map(([x, y]) => `${x * IMG_W},${y * IMG_H}`).join(' ');
-    poly.setAttribute('points', pts);
-    overlay.appendChild(poly);
+    const poly = L.polygon(polyToLatLngs(d.polygon), {
+      color: 'rgba(80, 180, 255, 0.8)',
+      fillColor: 'rgba(80, 180, 255, 0.25)',
+      weight: 3,
+      opacity: 0,
+      fillOpacity: 0,
+      interactive: false
+    }).addTo(map);
     districtPolys[di] = poly;
   });
 
-  // Place markers and labels
+  // Place markers — circle overlays in map coordinates, hidden by default
   data.districts.forEach((d, di) => {
     d.places.forEach(p => {
       if (p.x === undefined) return;
-      const m = document.createElement('div');
-      m.className = 'place-marker';
-      m.style.left = (p.x * IMG_W) + 'px';
-      m.style.top = (p.y * IMG_H) + 'px';
-      wrapper.appendChild(m);
-      markers[p.id] = m;
+      const latlng = toLatLng(p.x, p.y);
 
-      const lbl = document.createElement('div');
-      lbl.className = 'place-label';
-      lbl.textContent = p.name;
-      lbl.style.left = (p.x * IMG_W) + 'px';
-      lbl.style.top = (p.y * IMG_H) + 'px';
-      wrapper.appendChild(lbl);
-      labels[p.id] = lbl;
+      // Highlight circle (map-coordinate radius, scales with zoom)
+      const circle = L.circle(latlng, {
+        radius: 80,
+        color: 'rgba(255,255,255,0.3)',
+        fillColor: 'rgba(255,255,255,0.35)',
+        fillOpacity: 0,
+        opacity: 0,
+        weight: 2,
+        interactive: false
+      }).addTo(map);
+      placeMarkers[p.id] = circle;
+
+      // Tooltip bound to the circle, shown on highlight
+      circle.bindTooltip(p.name, {
+        permanent: true,
+        direction: 'bottom',
+        offset: [0, 30],
+        className: 'place-tooltip',
+        opacity: 0
+      });
+      placeLabels[p.id] = circle.getTooltip();
     });
   });
 }
 
-// Highlight helpers
 function clearHighlights() {
-  Object.values(districtPolys).forEach(p => p.classList.remove('highlight'));
-  Object.values(markers).forEach(m => m.classList.remove('highlight'));
-  Object.values(labels).forEach(l => l.classList.remove('visible'));
+  Object.values(districtPolys).forEach(p => {
+    p.setStyle({ opacity: 0, fillOpacity: 0 });
+  });
+  Object.values(placeMarkers).forEach(c => {
+    c.setStyle({ opacity: 0, fillOpacity: 0 });
+  });
+  Object.values(placeLabels).forEach(t => {
+    t.setOpacity(0);
+  });
 }
 
 function highlightDistrict(di) {
   clearHighlights();
-  if (districtPolys[di]) districtPolys[di].classList.add('highlight');
+  if (districtPolys[di]) {
+    districtPolys[di].setStyle({ opacity: 1, fillOpacity: 0.25 });
+  }
 }
 
 function highlightPlace(place) {
   clearHighlights();
-  if (markers[place.id]) markers[place.id].classList.add('highlight');
-  if (labels[place.id]) labels[place.id].classList.add('visible');
+  if (placeMarkers[place.id]) {
+    placeMarkers[place.id].setStyle({ opacity: 1, fillOpacity: 0.35 });
+  }
+  if (placeLabels[place.id]) {
+    placeLabels[place.id].setOpacity(0.9);
+  }
 }
 
-// Pan to a location
-function panTo(x, y) {
-  const rect = container.getBoundingClientRect();
-  panX = rect.width / 2 - x * IMG_W * scale;
-  panY = rect.height / 2 - y * IMG_H * scale;
-  applyTransform();
+function panToPlace(x, y) {
+  map.panTo(toLatLng(x, y));
+}
+
+function panToDistrict(district) {
+  if (district.polygon) {
+    const cx = district.polygon.reduce((s, p) => s + p[0], 0) / district.polygon.length;
+    const cy = district.polygon.reduce((s, p) => s + p[1], 0) / district.polygon.length;
+    map.panTo(toLatLng(cx, cy));
+  }
 }
 
 // Search
@@ -217,20 +234,11 @@ function doSearch(query) {
       el.classList.add('is-district');
       el.textContent = item.district.name;
       el.addEventListener('mouseenter', () => highlightDistrict(item.di));
-      el.addEventListener('click', () => {
-        if (item.district.polygon) {
-          // Center on polygon centroid
-          const cx = item.district.polygon.reduce((s, p) => s + p[0], 0) / item.district.polygon.length;
-          const cy = item.district.polygon.reduce((s, p) => s + p[1], 0) / item.district.polygon.length;
-          panTo(cx, cy);
-        }
-      });
+      el.addEventListener('click', () => panToDistrict(item.district));
     } else {
       el.innerHTML = item.place.name + `<span class="district-tag">${item.district.name}</span>`;
       el.addEventListener('mouseenter', () => highlightPlace(item.place));
-      el.addEventListener('click', () => {
-        panTo(item.place.x, item.place.y);
-      });
+      el.addEventListener('click', () => panToPlace(item.place.x, item.place.y));
     }
     resultsEl.appendChild(el);
   });
@@ -240,7 +248,6 @@ function doSearch(query) {
 
 searchInput.addEventListener('input', (e) => doSearch(e.target.value));
 searchInput.addEventListener('focus', () => { if (searchInput.value.trim()) doSearch(searchInput.value); });
-
 resultsEl.addEventListener('mouseleave', clearHighlights);
 
 // Close results when clicking outside
@@ -251,117 +258,10 @@ document.addEventListener('mousedown', (e) => {
   }
 });
 
-// Pan & zoom
-function applyTransform() {
-  wrapper.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
-}
-
-img.onload = () => {
-  const rect = container.getBoundingClientRect();
-  scale = Math.min(rect.width / IMG_W, rect.height / IMG_H);
-  panX = (rect.width - IMG_W * scale) / 2;
-  panY = (rect.height - IMG_H * scale) / 2;
-  applyTransform();
-};
-
-container.addEventListener('mousedown', (e) => {
-  if (e.button !== 0) return;
-  isDragging = true;
-  dragStartX = e.clientX;
-  dragStartY = e.clientY;
-  panStartX = panX;
-  panStartY = panY;
-  container.classList.add('dragging');
-});
-
-window.addEventListener('mousemove', (e) => {
-  if (!isDragging) return;
-  panX = panStartX + (e.clientX - dragStartX);
-  panY = panStartY + (e.clientY - dragStartY);
-  applyTransform();
-});
-
-window.addEventListener('mouseup', () => {
-  isDragging = false;
-  container.classList.remove('dragging');
-});
-
-container.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  const rect = container.getBoundingClientRect();
-  const mx = e.clientX - rect.left;
-  const my = e.clientY - rect.top;
-  const zoom = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-  const newScale = Math.min(Math.max(scale * zoom, 0.1), 10);
-  panX = mx - (mx - panX) * (newScale / scale);
-  panY = my - (my - panY) * (newScale / scale);
-  scale = newScale;
-  applyTransform();
-}, { passive: false });
-
-// Touch: pan and pinch-zoom
-let touches = {};
-let lastPinchDist = 0;
-
-container.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  for (const t of e.changedTouches) touches[t.identifier] = { x: t.clientX, y: t.clientY };
-  const ids = Object.keys(touches);
-  if (ids.length === 1) {
-    panStartX = panX;
-    panStartY = panY;
-    dragStartX = e.touches[0].clientX;
-    dragStartY = e.touches[0].clientY;
-  } else if (ids.length >= 2) {
-    const [a, b] = [e.touches[0], e.touches[1]];
-    lastPinchDist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-  }
-}, { passive: false });
-
-container.addEventListener('touchmove', (e) => {
-  e.preventDefault();
-  for (const t of e.changedTouches) touches[t.identifier] = { x: t.clientX, y: t.clientY };
-
-  if (e.touches.length === 1) {
-    // Pan
-    panX = panStartX + (e.touches[0].clientX - dragStartX);
-    panY = panStartY + (e.touches[0].clientY - dragStartY);
-    applyTransform();
-  } else if (e.touches.length >= 2) {
-    // Pinch zoom
-    const [a, b] = [e.touches[0], e.touches[1]];
-    const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-    if (lastPinchDist > 0) {
-      const rect = container.getBoundingClientRect();
-      const mx = (a.clientX + b.clientX) / 2 - rect.left;
-      const my = (a.clientY + b.clientY) / 2 - rect.top;
-      const zoom = dist / lastPinchDist;
-      const newScale = Math.min(Math.max(scale * zoom, 0.1), 10);
-      panX = mx - (mx - panX) * (newScale / scale);
-      panY = my - (my - panY) * (newScale / scale);
-      scale = newScale;
-      applyTransform();
-    }
-    lastPinchDist = dist;
-  }
-}, { passive: false });
-
-container.addEventListener('touchend', (e) => {
-  for (const t of e.changedTouches) delete touches[t.identifier];
-  if (Object.keys(touches).length < 2) lastPinchDist = 0;
-  if (Object.keys(touches).length === 1) {
-    const t = e.touches[0];
-    panStartX = panX;
-    panStartY = panY;
-    dragStartX = t.clientX;
-    dragStartY = t.clientY;
-  }
-});
-
-container.addEventListener('touchcancel', (e) => {
-  for (const t of e.changedTouches) delete touches[t.identifier];
-  lastPinchDist = 0;
-});
+// Prevent panel interactions from affecting the map (Leaflet utility)
+const panel = document.getElementById('panel');
+L.DomEvent.disableClickPropagation(panel);
+L.DomEvent.disableScrollPropagation(panel);
 
 // Keyboard: Escape clears search
 document.addEventListener('keydown', (e) => {
