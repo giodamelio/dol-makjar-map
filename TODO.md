@@ -10,6 +10,10 @@
 - [ ] **Draw Barsizi polygon** — Use calibrate.html to draw the polygon for the Barsizi district (places 31-32, southern area near Lake Nahami).
 - [ ] Mini map
 - [ ] Small Info/About with link to my site and the source code
+- [ ] Integrate the calibrate page with the current map page
+- [ ] Search: Allow searching by district to show all items in district, should be lowest priority only after only after the search is narrowed down to the district, so the top item in the dropdown is the district itself, and the rest of the items are the places in that district. So we can get a quick glance at what a neighborhood has in it
+- [ ] Allow searching for the lakes, rivers, fields that have labels
+- [ ] Setup SEO stuff
 
 ## Data
 
