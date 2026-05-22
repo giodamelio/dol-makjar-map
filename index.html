@@ -189,15 +189,34 @@ function highlightPlace(place) {
   }
 }
 
+// Target zoom: show roughly 800px of map-space on screen, regardless of screen size.
+// This means the numbered markers are clearly legible.
+function getTargetZoom() {
+  const size = map.getSize();
+  const smallerDim = Math.min(size.x, size.y);
+  // We want ~800 map-pixels visible across the smaller screen dimension.
+  // In CRS.Simple, zoom 0 = 1:1 pixels. Each zoom level doubles.
+  // targetZoom = log2(smallerDim / 800)
+  return Math.log2(smallerDim / 800);
+}
+
+function flyToPoint(latlng) {
+  const target = getTargetZoom();
+  const zoom = Math.max(map.getZoom(), target);
+  map.flyTo(latlng, zoom, { duration: 0.5 });
+}
+
 function panToPlace(x, y) {
-  map.panTo(toLatLng(x, y));
+  flyToPoint(toLatLng(x, y));
 }
 
 function panToDistrict(district) {
   if (district.polygon) {
-    const cx = district.polygon.reduce((s, p) => s + p[0], 0) / district.polygon.length;
-    const cy = district.polygon.reduce((s, p) => s + p[1], 0) / district.polygon.length;
-    map.panTo(toLatLng(cx, cy));
+    // Fit the polygon bounds, but don't zoom out further than current
+    const polyBounds = L.polygon(polyToLatLngs(district.polygon)).getBounds();
+    const fitZoom = map.getBoundsZoom(polyBounds);
+    const zoom = Math.max(map.getZoom(), fitZoom);
+    map.flyToBounds(polyBounds, { duration: 0.5, maxZoom: zoom });
   }
 }
 
