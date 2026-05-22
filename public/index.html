@@ -267,7 +267,7 @@
 								// Place markers — circle overlays in map coordinates, hidden by default
 								data.districts.forEach((d, di) => {
 									d.places.forEach(p => {
-										if (p.x === undefined) return;
+										if (p.x === undefined || p.area) return;
 										const latlng = toLatLng(p.x, p.y);
 										
 										// Highlight circle (map-coordinate radius, scales with zoom)
@@ -428,23 +428,14 @@
 																
 																// Target zoom: show roughly 800px of map-space on screen, regardless of screen size.
 																// This means the numbered markers are clearly legible.
-																function getTargetZoom() {
+																function panToPlace(place) {
+																	const latlng = toLatLng(place.x, place.y);
 																	const size = map.getSize();
 																	const smallerDim = Math.min(size.x, size.y);
-																	// We want ~800 map-pixels visible across the smaller screen dimension.
-																	// In CRS.Simple, zoom 0 = 1:1 pixels. Each zoom level doubles.
-																	// targetZoom = log2(smallerDim / 800)
-																	return Math.log2(smallerDim / 800);
-																}
-																
-																function flyToPoint(latlng) {
-																	const target = getTargetZoom();
+																	const mapPixels = place.area ? 1600 : 800;
+																	const target = Math.log2(smallerDim / mapPixels);
 																	const zoom = Math.max(map.getZoom(), target);
 																	map.flyTo(latlng, zoom, { duration: 0.5 });
-																}
-																
-																function panToPlace(x, y) {
-																	flyToPoint(toLatLng(x, y));
 																}
 																
 																function panToDistrict(district) {
@@ -474,7 +465,8 @@
 																		selectionEl.innerHTML = `<div><span class="sel-type">${item.district.name}</span></div><button class="sel-close">&times;</button>`;
 																		window.location.hash = `district/${encodeURIComponent(item.district.name.toLowerCase().replace(/\s+/g, '-'))}`;
 																		} else {
-																			selectionEl.innerHTML = `<div><span class="sel-name">${item.place.id}. ${item.place.name}</span><span class="sel-district">${item.district.name}</span></div><button class="sel-close">&times;</button>`;
+																			const selLabel = item.place.area ? item.place.name : `${item.place.id}. ${item.place.name}`;
+															selectionEl.innerHTML = `<div><span class="sel-name">${selLabel}</span><span class="sel-district">${item.district.name}</span></div><button class="sel-close">&times;</button>`;
 																			const placeSlug = item.place.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 																			window.location.hash = `place/${item.place.id}/${placeSlug}`;
 																		}
@@ -495,7 +487,7 @@
 																				// Open popup after fly completes
 																				map.once('moveend', showSelectionHighlight);
 																				if (item.type === 'district') panToDistrict(item.district);
-																				else panToPlace(item.place.x, item.place.y);
+																				else panToPlace(item.place);
 																				} else {
 																					showSelectionHighlight();
 																				}
@@ -570,7 +562,9 @@
 																									el.addEventListener('mouseenter', () => highlightDistrict(item.di));
 																									el.addEventListener('click', () => selectItem(item, true));
 																									} else {
-																										el.innerHTML = `<span style="color:#888;margin-right:4px">${item.place.id}.</span>${item.place.name}<span class="district-tag">${item.district.name}</span>`;
+																										el.innerHTML = item.place.area
+																							? `${item.place.name}<span class="district-tag">${item.district.name}</span>`
+																							: `<span style="color:#888;margin-right:4px">${item.place.id}.</span>${item.place.name}<span class="district-tag">${item.district.name}</span>`;
 																										el.addEventListener('mouseenter', () => highlightPlace(item.place, item.district));
 																										el.addEventListener('click', () => selectItem(item, true));
 																									}
