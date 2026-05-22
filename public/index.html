@@ -306,6 +306,7 @@
 										
 										function legendHitTest(x, y) {
 											if (!data.legend) return null;
+											if (!data || !data.legend) return null;
 											for (const entry of data.legend) {
 												if (!entry.box) continue;
 												const [x1, y1, x2, y2] = entry.box;
