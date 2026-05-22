@@ -6,37 +6,40 @@
 <title>Dol-Makjar</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; background: #1a1a1a; color: #ddd; }
+body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; background: #1a1a1a; color: #ddd; touch-action: none; }
 
-#search-bar {
-  position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
-  width: 360px; max-width: calc(100vw - 24px);
+#panel {
+  position: fixed; top: 16px; left: 16px; z-index: 10;
+  width: 320px; max-height: calc(100vh - 32px);
+  background: rgba(25, 25, 25, 0.95); border: 1px solid #444;
+  border-radius: 10px; backdrop-filter: blur(12px);
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+}
+#panel-header {
+  padding: 14px 16px 10px; border-bottom: 1px solid #333;
+}
+#panel-header h1 {
+  font-size: 16px; font-weight: 600; color: #eee; margin-bottom: 10px;
 }
 #search-input {
-  width: 100%; padding: 10px 14px; background: rgba(30, 30, 30, 0.95); border: 1px solid #555;
-  border-radius: 8px; color: #eee; font-size: 15px; outline: none;
-  backdrop-filter: blur(8px);
+  width: 100%; padding: 8px 12px; background: #2a2a2a; border: 1px solid #555;
+  border-radius: 6px; color: #eee; font-size: 14px; outline: none;
 }
 #search-input:focus { border-color: #88aaff; }
-#search-input::placeholder { color: #777; }
+#search-input::placeholder { color: #666; }
 
 #results {
-  margin-top: 4px; background: rgba(30, 30, 30, 0.95); border: 1px solid #555;
-  border-radius: 8px; max-height: 400px; overflow-y: auto; display: none;
-  backdrop-filter: blur(8px);
+  overflow-y: auto; max-height: calc(100vh - 140px); display: none;
 }
 #results.open { display: block; }
 
-.result-group-header {
-  padding: 6px 14px; font-size: 11px; color: #888; text-transform: uppercase;
-  letter-spacing: 0.5px; border-bottom: 1px solid #333; background: rgba(40, 40, 40, 0.5);
-}
 .result-item {
-  padding: 8px 14px; cursor: pointer; font-size: 14px; border-bottom: 1px solid #2a2a2a;
+  padding: 8px 16px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #2a2a2a;
 }
 .result-item:hover, .result-item.active { background: rgba(80, 130, 255, 0.15); }
 .result-item .district-tag {
-  font-size: 11px; color: #888; margin-left: 8px;
+  font-size: 11px; color: #666; margin-left: 8px;
 }
 .result-item.is-district { font-weight: bold; color: #8af; }
 
@@ -81,8 +84,11 @@ svg#overlay polygon.highlight { fill: rgba(80, 180, 255, 0.25); stroke: rgba(80,
 </head>
 <body>
 
-<div id="search-bar">
-  <input id="search-input" type="text" placeholder="Search places and districts..." autocomplete="off">
+<div id="panel">
+  <div id="panel-header">
+    <h1>Dol-Makjar</h1>
+    <input id="search-input" type="text" placeholder="Search places and districts..." autocomplete="off">
+  </div>
   <div id="results"></div>
 </div>
 
@@ -162,12 +168,6 @@ function clearHighlights() {
 function highlightDistrict(di) {
   clearHighlights();
   if (districtPolys[di]) districtPolys[di].classList.add('highlight');
-  // Also highlight all places in this district
-  const d = data.districts[di];
-  d.places.forEach(p => {
-    if (markers[p.id]) markers[p.id].classList.add('highlight');
-    if (labels[p.id]) labels[p.id].classList.add('visible');
-  });
 }
 
 function highlightPlace(place) {
@@ -245,7 +245,7 @@ resultsEl.addEventListener('mouseleave', clearHighlights);
 
 // Close results when clicking outside
 document.addEventListener('mousedown', (e) => {
-  if (!e.target.closest('#search-bar')) {
+  if (!e.target.closest('#panel')) {
     resultsEl.classList.remove('open');
     clearHighlights();
   }
@@ -298,6 +298,70 @@ container.addEventListener('wheel', (e) => {
   scale = newScale;
   applyTransform();
 }, { passive: false });
+
+// Touch: pan and pinch-zoom
+let touches = {};
+let lastPinchDist = 0;
+
+container.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) touches[t.identifier] = { x: t.clientX, y: t.clientY };
+  const ids = Object.keys(touches);
+  if (ids.length === 1) {
+    panStartX = panX;
+    panStartY = panY;
+    dragStartX = e.touches[0].clientX;
+    dragStartY = e.touches[0].clientY;
+  } else if (ids.length >= 2) {
+    const [a, b] = [e.touches[0], e.touches[1]];
+    lastPinchDist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  }
+}, { passive: false });
+
+container.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  for (const t of e.changedTouches) touches[t.identifier] = { x: t.clientX, y: t.clientY };
+
+  if (e.touches.length === 1) {
+    // Pan
+    panX = panStartX + (e.touches[0].clientX - dragStartX);
+    panY = panStartY + (e.touches[0].clientY - dragStartY);
+    applyTransform();
+  } else if (e.touches.length >= 2) {
+    // Pinch zoom
+    const [a, b] = [e.touches[0], e.touches[1]];
+    const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    if (lastPinchDist > 0) {
+      const rect = container.getBoundingClientRect();
+      const mx = (a.clientX + b.clientX) / 2 - rect.left;
+      const my = (a.clientY + b.clientY) / 2 - rect.top;
+      const zoom = dist / lastPinchDist;
+      const newScale = Math.min(Math.max(scale * zoom, 0.1), 10);
+      panX = mx - (mx - panX) * (newScale / scale);
+      panY = my - (my - panY) * (newScale / scale);
+      scale = newScale;
+      applyTransform();
+    }
+    lastPinchDist = dist;
+  }
+}, { passive: false });
+
+container.addEventListener('touchend', (e) => {
+  for (const t of e.changedTouches) delete touches[t.identifier];
+  if (Object.keys(touches).length < 2) lastPinchDist = 0;
+  if (Object.keys(touches).length === 1) {
+    const t = e.touches[0];
+    panStartX = panX;
+    panStartY = panY;
+    dragStartX = t.clientX;
+    dragStartY = t.clientY;
+  }
+});
+
+container.addEventListener('touchcancel', (e) => {
+  for (const t of e.changedTouches) delete touches[t.identifier];
+  lastPinchDist = 0;
+});
 
 // Keyboard: Escape clears search
 document.addEventListener('keydown', (e) => {
