@@ -232,9 +232,9 @@ function panToDistrict(district) {
   if (district.polygon) {
     // Fit the polygon bounds, but don't zoom out further than current
     const polyBounds = L.polygon(polyToLatLngs(district.polygon)).getBounds();
-    const fitZoom = map.getBoundsZoom(polyBounds);
+    const fitZoom = map.getBoundsZoom(polyBounds.pad(0.3)); // pad 30% for breathing room
     const zoom = Math.max(map.getZoom(), fitZoom);
-    map.flyToBounds(polyBounds, { duration: 0.5, maxZoom: zoom });
+    map.flyToBounds(polyBounds.pad(0.3), { duration: 0.5, maxZoom: zoom });
   }
 }
 
