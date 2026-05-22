@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
+:root { interpolate-size: allow-keywords; }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; background: #1a1a1a; color: #ddd; }
 
@@ -18,18 +19,58 @@ body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; back
 
 #panel {
   position: fixed; top: 16px; left: 16px; z-index: 1000;
-  width: 320px; max-height: calc(100vh - 32px);
+  width: 320px;
   background: rgba(25, 25, 25, 0.95); border: 1px solid #444;
   border-radius: 10px; backdrop-filter: blur(12px);
-  display: flex; flex-direction: column; overflow: hidden;
+  overflow: hidden;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  transition: width 0.25s ease;
+}
+#panel.collapsed {
+  width: 44px;
+  cursor: pointer;
+}
+#panel-content {
+  width: 320px; /* fixed — never changes, prevents reflow */
+  display: grid; grid-template-rows: auto 1fr; align-content: start;
+  transition: grid-template-rows 0.25s ease;
+}
+#panel.collapsed #panel-content {
+  grid-template-rows: auto 0fr;
+}
+#panel-collapsible {
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+#panel-collapsible #search-input {
+  margin: 10px; width: auto;
 }
 #panel-header {
-  padding: 14px 16px 10px; border-bottom: 1px solid #333;
+  padding: 14px 16px; border-bottom: 1px solid #333;
 }
-#panel-header h1 {
-  font-size: 16px; font-weight: 600; color: #eee; margin-bottom: 10px;
+#panel-title-row {
+  display: flex; align-items: center; gap: 8px;
 }
+#collapse-btn {
+  background: none; border: none; color: #777; cursor: pointer;
+  width: 22px; height: 22px; flex-shrink: 0;
+  border-radius: 4px; display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+#collapse-btn:hover { color: #ccc; background: rgba(255,255,255,0.08); }
+#collapse-btn .icon-collapse { display: block; }
+#collapse-btn .icon-search { display: none; }
+#panel.collapsed #collapse-btn .icon-collapse { display: none; }
+#panel.collapsed #collapse-btn .icon-search { display: block; }
+#panel.collapsed #collapse-btn { color: #bbb; }
+#panel.collapsed #panel-header { border-bottom: none; padding: 11px; }
+#panel-title-row h1 {
+  font-size: 16px; font-weight: 600; color: #eee; margin: 0; flex: 1;
+}
+#panel-buttons {
+  display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+}
+
 #search-input {
   width: 100%; padding: 8px 12px; background: #2a2a2a; border: 1px solid #555;
   border-radius: 6px; color: #eee; font-size: 14px; outline: none;
@@ -84,12 +125,25 @@ body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; back
 <body>
 
 <div id="panel">
-  <div id="panel-header">
-    <h1>Dol-Makjar</h1>
-    <input id="search-input" type="text" placeholder="Search places and districts..." autocomplete="off">
+  <div id="panel-content">
+    <div id="panel-header">
+      <div id="panel-title-row">
+        <button id="collapse-btn" title="Collapse panel">
+          <!-- Heroicon: chevron-up (outline, 24x24) -->
+          <svg class="icon-collapse" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 15.75l7.5-7.5 7.5 7.5"/></svg>
+          <!-- Heroicon: magnifying-glass (outline, 24x24) -->
+          <svg class="icon-search" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+        </button>
+        <h1>Dol-Makjar</h1>
+        <div id="panel-buttons"></div>
+      </div>
+    </div>
+    <div id="panel-collapsible">
+      <input id="search-input" type="text" placeholder="Search places and districts..." autocomplete="off">
+      <div id="selection" style="display:none"></div>
+      <div id="results"></div>
+    </div>
   </div>
-  <div id="selection" style="display:none"></div>
-  <div id="results"></div>
 </div>
 
 <div id="map"></div>
@@ -498,6 +552,20 @@ document.addEventListener('mousedown', (e) => {
 const panel = document.getElementById('panel');
 L.DomEvent.disableClickPropagation(panel);
 L.DomEvent.disableScrollPropagation(panel);
+
+// Panel collapse/expand
+const collapseBtn = document.getElementById('collapse-btn');
+collapseBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  panel.classList.toggle('collapsed');
+  collapseBtn.title = panel.classList.contains('collapsed') ? 'Expand panel' : 'Collapse panel';
+});
+panel.addEventListener('click', (e) => {
+  if (panel.classList.contains('collapsed')) {
+    panel.classList.remove('collapsed');
+    collapseBtn.title = 'Collapse panel';
+  }
+});
 
 // Keyboard: Escape clears search
 document.addEventListener('keydown', (e) => {
