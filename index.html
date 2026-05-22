@@ -78,6 +78,7 @@ body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; back
 .place-popup .leaflet-popup-tip { border-top-color: rgba(20, 20, 20, 0.9); }
 .place-popup .leaflet-popup-close-button { color: #888 !important; }
 .place-popup .leaflet-popup-close-button:hover { color: #fff !important; }
+
 </style>
 </head>
 <body>
@@ -132,6 +133,7 @@ const selectionEl = document.getElementById('selection');
 fetch('places.json').then(r => r.json()).then(d => {
   data = d;
   buildOverlays();
+  buildLegendOverlays();
   // Check URL hash for initial selection
   const hashItem = resolveHash();
   if (hashItem) selectItem(hashItem, true);
@@ -172,6 +174,96 @@ function buildOverlays() {
 
     });
   });
+}
+
+// Legend — clickable regions over the printed legend on the map image
+// Uses coordinate-based hit testing on map mousemove instead of individual SVG
+// rects, which avoids Leaflet SVG renderer clipping/hit-testing issues.
+let activeLegendUnderline = null;
+let currentLegendHover = null;
+
+function clearLegendHover() {
+  if (activeLegendUnderline) {
+    map.removeLayer(activeLegendUnderline);
+    activeLegendUnderline = null;
+  }
+  if (currentLegendHover) {
+    map.getContainer().style.cursor = '';
+    currentLegendHover = null;
+  }
+  clearHighlights();
+  if (currentSelection) showSelectionHighlight();
+}
+
+function legendHitTest(x, y) {
+  if (!data.legend) return null;
+  for (const entry of data.legend) {
+    if (!entry.box) continue;
+    const [x1, y1, x2, y2] = entry.box;
+    if (x >= Math.min(x1, x2) && x <= Math.max(x1, x2) &&
+        y >= Math.min(y1, y2) && y <= Math.max(y1, y2)) return entry;
+  }
+  return null;
+}
+
+function showLegendUnderline(entry) {
+  const [x1, y1, x2, y2] = entry.box;
+  const underlineColor = entry.type === 'district' ? '#b5642a' : '#222';
+  const botY = Math.max(y1, y2);
+  const lat = IMG_H * (1 - botY);
+  activeLegendUnderline = L.polyline([
+    [lat, Math.min(x1, x2) * IMG_W],
+    [lat, Math.max(x1, x2) * IMG_W]
+  ], { color: underlineColor, weight: 2, interactive: false }).addTo(map);
+}
+
+map.on('mousemove', (e) => {
+  const x = e.latlng.lng / IMG_W;
+  const y = 1 - e.latlng.lat / IMG_H;
+  const entry = legendHitTest(x, y);
+
+  if (entry === currentLegendHover) return;
+
+  // Clear previous hover
+  if (currentLegendHover) clearLegendHover();
+
+  if (!entry) return;
+
+  currentLegendHover = entry;
+  map.getContainer().style.cursor = 'pointer';
+  showLegendUnderline(entry);
+  const item = legendEntryToItem(entry);
+  if (item) {
+    if (item.type === 'district') highlightDistrict(item.di);
+    else highlightPlace(item.place, item.district);
+  }
+});
+
+map.on('zoomstart', clearLegendHover);
+
+map.on('click', (e) => {
+  const x = e.latlng.lng / IMG_W;
+  const y = 1 - e.latlng.lat / IMG_H;
+  const entry = legendHitTest(x, y);
+  if (entry) {
+    clearLegendHover();
+    const item = legendEntryToItem(entry);
+    if (item) selectItem(item, true);
+  }
+});
+
+function buildLegendOverlays() {
+  // No-op — legend hover/click is handled by map mousemove/click hit testing above
+}
+
+function legendEntryToItem(entry) {
+  const d = data.districts[entry.di];
+  if (entry.type === 'district') {
+    return { type: 'district', district: d, di: entry.di };
+  }
+  const p = d.places.find(pl => pl.id === entry.id);
+  if (p) return { type: 'place', place: p, district: d, di: entry.di };
+  return null;
 }
 
 function clearHighlights() {

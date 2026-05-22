@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Dol-Makjar Map Calibration</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -106,6 +106,31 @@ svg#poly-overlay polygon.active-poly {
 svg#poly-overlay polyline {
   fill: none; stroke: rgba(80, 180, 255, 0.7); stroke-width: 2; stroke-dasharray: 6 3;
 }
+
+/* Legend mode */
+.legend-corner {
+  position: absolute; width: 12px; height: 12px; border-radius: 50%;
+  background: rgba(255, 200, 80, 0.8); border: 2px solid #fff;
+  transform: translate(-50%, -50%); pointer-events: auto; cursor: nwse-resize;
+}
+.legend-corner:hover { background: rgba(255, 255, 100, 1); }
+.legend-corner.dragging-corner { background: rgba(255, 255, 100, 1); }
+.legend-corner[data-corner="tr"],
+.legend-corner[data-corner="bl"] { cursor: nesw-resize; }
+.legend-edge {
+  position: absolute; pointer-events: auto;
+  background: rgba(255, 200, 80, 0.15);
+}
+.legend-edge:hover { background: rgba(255, 200, 80, 0.4); }
+.legend-edge[data-corner="top"],
+.legend-edge[data-corner="bottom"] { cursor: ns-resize; height: 6px; transform: translateY(-50%); }
+.legend-edge[data-corner="left"],
+.legend-edge[data-corner="right"] { cursor: ew-resize; width: 6px; transform: translateX(-50%); }
+.legend-move {
+  position: absolute; pointer-events: auto; cursor: move;
+  background: rgba(255, 200, 80, 0.08); border: 1px solid transparent;
+}
+.legend-move:hover { border-color: rgba(255, 200, 80, 0.4); }
 </style>
 </head>
 <body>
@@ -115,6 +140,7 @@ svg#poly-overlay polyline {
   <div id="mode-tabs">
     <button class="active" data-mode="point">Points</button>
     <button data-mode="polygon">Polygons</button>
+    <button data-mode="legend">Legend</button>
   </div>
   <div id="place-list"></div>
   <div id="controls">
@@ -143,6 +169,40 @@ let allPlaces = [];
 let editingDistrictIdx = -1; // -1 means not editing any district
 let polyPoints = [];
 
+// Legend state — entries stored directly in data.legend as { type, di, id?, box: [x1,y1,x2,y2] }
+let selectedLegendIdx = -1;
+let legendDragging = null; // { corner: 'tl'|'tr'|'bl'|'br'|'move', startMouse: [x,y], startBox: [x1,y1,x2,y2] }
+
+function loadLegendFromData() {
+  if (!data.legend) { data.legend = []; return; }
+  // Convert old panel format (has 'districts' key) to individual boxes
+  if (data.legend.length > 0 && data.legend[0].districts) {
+    const boxes = [];
+    data.legend.forEach(panel => {
+      let lineIdx = 0;
+      panel.districts.forEach(di => {
+        const d = data.districts[di];
+        const y1 = panel.y + lineIdx * panel.lineH;
+        boxes.push({ type: 'district', di, box: [panel.x, y1, panel.x + panel.w, y1 + panel.lineH] });
+        lineIdx++;
+        d.places.forEach(p => {
+          const py = panel.y + lineIdx * panel.lineH;
+          boxes.push({ type: 'place', di, id: p.id, box: [panel.x, py, panel.x + panel.w, py + panel.lineH] });
+          lineIdx++;
+        });
+      });
+    });
+    data.legend = boxes;
+  }
+}
+
+function legendEntryLabel(entry) {
+  if (entry.type === 'district') return data.districts[entry.di].name;
+  const d = data.districts[entry.di];
+  const p = d.places.find(pl => pl.id === entry.id);
+  return p ? `${p.id}. ${p.name}` : '?';
+}
+
 // Pan/zoom state
 let scale = 1, panX = 0, panY = 0;
 let isDragging = false, dragStartX, dragStartY, panStartX, panStartY;
@@ -161,6 +221,7 @@ const statusEl = document.getElementById('status');
 fetch('places.json').then(r => r.json()).then(d => {
   data = d;
   buildFlatList();
+  loadLegendFromData();
   renderSidebar();
   updateStatus();
 });
@@ -249,7 +310,7 @@ function renderSidebar() {
     });
     const active = placeList.querySelector('.active');
     if (active) active.scrollIntoView({ block: 'nearest' });
-  } else {
+  } else if (mode === 'polygon') {
     // Polygon mode - show districts with edit/done buttons
     data.districts.forEach((d, di) => {
       const row = document.createElement('div');
@@ -301,6 +362,41 @@ function renderSidebar() {
 
       placeList.appendChild(row);
     });
+  } else if (mode === 'legend') {
+    let lastDi = -1;
+    data.legend.forEach((entry, idx) => {
+      // District group header when district changes
+      if (entry.di !== lastDi) {
+        lastDi = entry.di;
+        const header = document.createElement('div');
+        header.className = 'district-header';
+        header.textContent = data.districts[entry.di].name;
+        placeList.appendChild(header);
+      }
+      const item = document.createElement('div');
+      item.className = 'place-item';
+      if (idx === selectedLegendIdx) item.classList.add('active');
+      if (entry.box) item.classList.add('done');
+      if (entry.type === 'district') item.style.fontWeight = 'bold';
+      const name = document.createElement('span');
+      name.textContent = legendEntryLabel(entry);
+      item.appendChild(name);
+      if (entry.box) {
+        const coords = document.createElement('span');
+        coords.className = 'coords';
+        coords.textContent = `${entry.box[0].toFixed(3)},${entry.box[1].toFixed(3)}`;
+        item.appendChild(coords);
+      }
+      item.addEventListener('click', () => {
+        selectedLegendIdx = idx;
+        renderSidebar();
+        renderOverlays();
+        updateStatus();
+      });
+      placeList.appendChild(item);
+    });
+    const active = placeList.querySelector('.active');
+    if (active) active.scrollIntoView({ block: 'nearest' });
   }
 }
 
@@ -315,6 +411,15 @@ function updateStatus() {
   } else if (isEditing()) {
     const d = data.districts[editingDistrictIdx];
     statusEl.textContent = `Editing ${d.name}: ${polyPoints.length} pts — click to add, drag to move`;
+  } else if (mode === 'legend') {
+    if (selectedLegendIdx >= 0) {
+      const entry = data.legend[selectedLegendIdx];
+      statusEl.textContent = entry.box
+        ? `Drag corners to resize, drag box to move`
+        : `Click map to place box`;
+    } else {
+      statusEl.textContent = 'Select an entry from the list';
+    }
   } else {
     statusEl.textContent = 'Click "Draw" to start a polygon';
   }
@@ -360,6 +465,41 @@ container.addEventListener('mousedown', (e) => {
     }
   }
 
+  // Legend corner or move handle drag
+  if (mode === 'legend' && selectedLegendIdx >= 0) {
+    const entry = data.legend[selectedLegendIdx];
+    if (entry && entry.box) {
+      if (e.target.classList.contains('legend-corner')) {
+        legendDragging = {
+          corner: e.target.dataset.corner,
+          startMouse: screenToImage(e.clientX, e.clientY),
+          startBox: entry.box.slice()
+        };
+        e.target.classList.add('dragging-corner');
+        e.preventDefault();
+        return;
+      }
+      if (e.target.classList.contains('legend-edge')) {
+        legendDragging = {
+          corner: e.target.dataset.corner,
+          startMouse: screenToImage(e.clientX, e.clientY),
+          startBox: entry.box.slice()
+        };
+        e.preventDefault();
+        return;
+      }
+      if (e.target.classList.contains('legend-move') || e.target.dataset.action === 'move') {
+        legendDragging = {
+          corner: 'move',
+          startMouse: screenToImage(e.clientX, e.clientY),
+          startBox: entry.box.slice()
+        };
+        e.preventDefault();
+        return;
+      }
+    }
+  }
+
   isDragging = true;
   dragStartX = e.clientX;
   dragStartY = e.clientY;
@@ -369,6 +509,29 @@ container.addEventListener('mousedown', (e) => {
 });
 
 window.addEventListener('mousemove', (e) => {
+  if (legendDragging && selectedLegendIdx >= 0) {
+    const [mx, my] = screenToImage(e.clientX, e.clientY);
+    const entry = data.legend[selectedLegendIdx];
+    const sb = legendDragging.startBox;
+    const dx = mx - legendDragging.startMouse[0];
+    const dy = my - legendDragging.startMouse[1];
+    if (legendDragging.corner === 'move') {
+      entry.box = [sb[0] + dx, sb[1] + dy, sb[2] + dx, sb[3] + dy];
+    } else {
+      entry.box = sb.slice();
+      const c = legendDragging.corner;
+      if (c === 'tl') { entry.box[0] = sb[0] + dx; entry.box[1] = sb[1] + dy; }
+      else if (c === 'tr') { entry.box[2] = sb[2] + dx; entry.box[1] = sb[1] + dy; }
+      else if (c === 'bl') { entry.box[0] = sb[0] + dx; entry.box[3] = sb[3] + dy; }
+      else if (c === 'br') { entry.box[2] = sb[2] + dx; entry.box[3] = sb[3] + dy; }
+      else if (c === 'top') { entry.box[1] = sb[1] + dy; }
+      else if (c === 'bottom') { entry.box[3] = sb[3] + dy; }
+      else if (c === 'left') { entry.box[0] = sb[0] + dx; }
+      else if (c === 'right') { entry.box[2] = sb[2] + dx; }
+    }
+    renderOverlays();
+    return;
+  }
   if (isDraggingPoint) {
     const [rx, ry] = screenToImage(e.clientX, e.clientY);
     polyPoints[draggingPointIdx] = [
@@ -385,6 +548,12 @@ window.addEventListener('mousemove', (e) => {
 });
 
 window.addEventListener('mouseup', (e) => {
+  if (legendDragging) {
+    legendDragging = null;
+    renderOverlays();
+    renderSidebar();
+    return;
+  }
   if (isDraggingPoint) {
     isDraggingPoint = false;
     draggingPointIdx = -1;
@@ -416,10 +585,77 @@ container.addEventListener('wheel', (e) => {
   applyTransform();
 }, { passive: false });
 
+// Touch: pan (1 finger) and pinch-to-zoom (2 fingers)
+let touchState = null;
+container.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 1) {
+    touchState = { type: 'pan', startX: e.touches[0].clientX, startY: e.touches[0].clientY, panStartX: panX, panStartY: panY };
+  } else if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    const my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    touchState = { type: 'pinch', dist: Math.hypot(dx, dy), startScale: scale, mx, my, panStartX: panX, panStartY: panY };
+  }
+  e.preventDefault();
+}, { passive: false });
+
+container.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (!touchState) return;
+  if (touchState.type === 'pan' && e.touches.length === 1) {
+    panX = touchState.panStartX + (e.touches[0].clientX - touchState.startX);
+    panY = touchState.panStartY + (e.touches[0].clientY - touchState.startY);
+    applyTransform();
+  } else if (touchState.type === 'pinch' && e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.hypot(dx, dy);
+    const zoom = dist / touchState.dist;
+    const newScale = Math.min(Math.max(touchState.startScale * zoom, 0.1), 10);
+    const rect = container.getBoundingClientRect();
+    const mx = touchState.mx - rect.left;
+    const my = touchState.my - rect.top;
+    panX = mx - (mx - touchState.panStartX) * (newScale / touchState.startScale);
+    panY = my - (my - touchState.panStartY) * (newScale / touchState.startScale);
+    scale = newScale;
+    applyTransform();
+  }
+}, { passive: false });
+
+container.addEventListener('touchend', (e) => {
+  if (e.touches.length === 0 && touchState?.type === 'pan') {
+    const dx = Math.abs(panX - touchState.panStartX);
+    const dy = Math.abs(panY - touchState.panStartY);
+    if (dx < 4 && dy < 4) {
+      handleMapClick({ clientX: touchState.startX, clientY: touchState.startY });
+    }
+  }
+  touchState = null;
+});
+
+// Prevent browser zoom from any stray gestures on the page
+document.addEventListener('touchmove', (e) => {
+  if (e.touches.length > 1) e.preventDefault();
+}, { passive: false });
+
 // Map click — simple, no delays
 function handleMapClick(e) {
   const [rx, ry] = screenToImage(e.clientX, e.clientY);
   if (rx < 0 || rx > 1 || ry < 0 || ry > 1) return;
+
+  if (mode === 'legend') {
+    if (selectedLegendIdx >= 0) {
+      const entry = data.legend[selectedLegendIdx];
+      if (!entry.box) {
+        // Create a default box at the click location
+        entry.box = [rx, ry, rx + 0.12, ry + 0.012];
+      }
+      renderSidebar();
+      renderOverlays();
+    }
+    return;
+  }
 
   if (mode === 'point') {
     if (currentPlaceIdx >= allPlaces.length) return;
@@ -443,7 +679,8 @@ function handleMapClick(e) {
 
 // Render markers and polygons
 function renderOverlays() {
-  wrapper.querySelectorAll('.marker, .poly-point').forEach(el => el.remove());
+  if (!data) return;
+  wrapper.querySelectorAll('.marker, .poly-point, .legend-corner, .legend-edge, .legend-move').forEach(el => el.remove());
 
   // Place markers
   allPlaces.forEach(({ place }) => {
@@ -492,6 +729,84 @@ function renderOverlays() {
       line.setAttribute('points', pts);
       polyOverlay.appendChild(line);
     }
+  }
+
+  // Legend overlays
+  if (mode === 'legend' && data && data.legend) {
+    data.legend.forEach((entry, idx) => {
+      if (!entry.box) return;
+      const [bx1, by1, bx2, by2] = entry.box;
+      const px1 = bx1 * IMG_W, py1 = by1 * IMG_H;
+      const px2 = bx2 * IMG_W, py2 = by2 * IMG_H;
+      const isSelected = idx === selectedLegendIdx;
+      const color = entry.type === 'district' ? 'rgba(80, 180, 255,' : 'rgba(248, 197, 108,';
+
+      // Box outline
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', Math.min(px1, px2));
+      rect.setAttribute('y', Math.min(py1, py2));
+      rect.setAttribute('width', Math.abs(px2 - px1));
+      rect.setAttribute('height', Math.abs(py2 - py1));
+      rect.setAttribute('fill', color + (isSelected ? '0.15)' : '0.08)'));
+      rect.setAttribute('stroke', color + (isSelected ? '1)' : '0.8)'));
+      rect.setAttribute('stroke-width', isSelected ? '3' : '2');
+      polyOverlay.appendChild(rect);
+
+      // Bottom underline (what renders on the real map)
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', px1);
+      line.setAttribute('y1', py2);
+      line.setAttribute('x2', px2);
+      line.setAttribute('y2', py2);
+      line.setAttribute('stroke', color + '1)');
+      line.setAttribute('stroke-width', isSelected ? '4' : '2');
+      polyOverlay.appendChild(line);
+
+      // Draggable corners + move handle for selected entry
+      if (isSelected) {
+        // Move handle (transparent div over the box)
+        const moveDiv = document.createElement('div');
+        moveDiv.className = 'legend-move';
+        moveDiv.dataset.action = 'move';
+        moveDiv.style.left = Math.min(px1, px2) + 'px';
+        moveDiv.style.top = Math.min(py1, py2) + 'px';
+        moveDiv.style.width = Math.abs(px2 - px1) + 'px';
+        moveDiv.style.height = Math.abs(py2 - py1) + 'px';
+        wrapper.appendChild(moveDiv);
+
+        // 4 edge handles
+        const minX = Math.min(px1, px2), maxX = Math.max(px1, px2);
+        const minY = Math.min(py1, py2), maxY = Math.max(py1, py2);
+        const w = maxX - minX, h = maxY - minY;
+        [
+          ['top', minX, minY, w, null],
+          ['bottom', minX, maxY, w, null],
+          ['left', minX, minY, null, h],
+          ['right', maxX, minY, null, h],
+        ].forEach(([edge, ex, ey, ew, eh]) => {
+          const el = document.createElement('div');
+          el.className = 'legend-edge';
+          el.dataset.corner = edge;
+          el.dataset.idx = idx;
+          el.style.left = ex + 'px';
+          el.style.top = ey + 'px';
+          if (ew !== null) el.style.width = ew + 'px';
+          if (eh !== null) el.style.height = eh + 'px';
+          wrapper.appendChild(el);
+        });
+
+        // 4 corner dots
+        [['tl', px1, py1], ['tr', px2, py1], ['bl', px1, py2], ['br', px2, py2]].forEach(([corner, cx, cy]) => {
+          const dot = document.createElement('div');
+          dot.className = 'legend-corner';
+          dot.dataset.corner = corner;
+          dot.dataset.idx = idx;
+          dot.style.left = cx + 'px';
+          dot.style.top = cy + 'px';
+          wrapper.appendChild(dot);
+        });
+      }
+    });
   }
 }
 
@@ -545,6 +860,7 @@ document.getElementById('btn-load').addEventListener('click', () => {
   fetch('places.json').then(r => r.json()).then(d => {
     data = d;
     buildFlatList();
+    loadLegendFromData();
     editingDistrictIdx = -1;
     polyPoints = [];
     container.classList.remove('editing');
