@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dol-Makjar</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: system-ui, sans-serif; height: 100vh; overflow: hidden; background: #1a1a1a; color: #ddd; }
+
+#search-bar {
+  position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
+  width: 360px; max-width: calc(100vw - 24px);
+}
+#search-input {
+  width: 100%; padding: 10px 14px; background: rgba(30, 30, 30, 0.95); border: 1px solid #555;
+  border-radius: 8px; color: #eee; font-size: 15px; outline: none;
+  backdrop-filter: blur(8px);
+}
+#search-input:focus { border-color: #88aaff; }
+#search-input::placeholder { color: #777; }
+
+#results {
+  margin-top: 4px; background: rgba(30, 30, 30, 0.95); border: 1px solid #555;
+  border-radius: 8px; max-height: 400px; overflow-y: auto; display: none;
+  backdrop-filter: blur(8px);
+}
+#results.open { display: block; }
+
+.result-group-header {
+  padding: 6px 14px; font-size: 11px; color: #888; text-transform: uppercase;
+  letter-spacing: 0.5px; border-bottom: 1px solid #333; background: rgba(40, 40, 40, 0.5);
+}
+.result-item {
+  padding: 8px 14px; cursor: pointer; font-size: 14px; border-bottom: 1px solid #2a2a2a;
+}
+.result-item:hover, .result-item.active { background: rgba(80, 130, 255, 0.15); }
+.result-item .district-tag {
+  font-size: 11px; color: #888; margin-left: 8px;
+}
+.result-item.is-district { font-weight: bold; color: #8af; }
+
+#map-container {
+  width: 100%; height: 100%; overflow: hidden; cursor: grab; position: relative;
+}
+#map-container.dragging { cursor: grabbing; }
+
+#map-wrapper {
+  position: absolute; transform-origin: 0 0;
+}
+#map-img { display: block; }
+
+svg#overlay {
+  position: absolute; top: 0; left: 0; pointer-events: none;
+}
+svg#overlay polygon { fill: transparent; stroke: transparent; stroke-width: 0; transition: fill 0.2s, stroke 0.2s; }
+svg#overlay polygon.highlight { fill: rgba(80, 180, 255, 0.25); stroke: rgba(80, 180, 255, 0.8); stroke-width: 3; }
+
+.place-marker {
+  position: absolute; border-radius: 50%;
+  transform: translate(-50%, -50%); pointer-events: none;
+  transition: all 0.3s ease;
+  width: 24px; height: 24px;
+  background: transparent; border: 3px solid transparent;
+  box-shadow: none;
+}
+.place-marker.highlight {
+  width: 200px; height: 200px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.15) 40%, rgba(255, 255, 255, 0) 70%);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.place-label {
+  position: absolute; transform: translate(-50%, 80px);
+  background: rgba(20, 20, 20, 0.85); color: #fff; padding: 6px 14px;
+  border-radius: 6px; font-size: 24px; white-space: nowrap;
+  pointer-events: none; opacity: 0; transition: opacity 0.2s;
+}
+.place-label.visible { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="search-bar">
+  <input id="search-input" type="text" placeholder="Search places and districts..." autocomplete="off">
+  <div id="results"></div>
+</div>
+
+<div id="map-container">
+  <div id="map-wrapper">
+    <img id="map-img" src="original-map.jpg" draggable="false">
+    <svg id="overlay"></svg>
+  </div>
+</div>
+
+<script>
+const IMG_W = 3600, IMG_H = 5400;
+let data = null;
+let scale = 1, panX = 0, panY = 0;
+let isDragging = false, dragStartX, dragStartY, panStartX, panStartY;
+
+const container = document.getElementById('map-container');
+const wrapper = document.getElementById('map-wrapper');
+const img = document.getElementById('map-img');
+const overlay = document.getElementById('overlay');
+const searchInput = document.getElementById('search-input');
+const resultsEl = document.getElementById('results');
+
+// Markers and labels (keyed by place id)
+const markers = {};
+const labels = {};
+// District polygons (keyed by district index)
+const districtPolys = {};
+
+fetch('places.json').then(r => r.json()).then(d => {
+  data = d;
+  overlay.setAttribute('width', IMG_W);
+  overlay.setAttribute('height', IMG_H);
+  buildOverlays();
+});
+
+function buildOverlays() {
+  // District polygons
+  data.districts.forEach((d, di) => {
+    if (!d.polygon) return;
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    const pts = d.polygon.map(([x, y]) => `${x * IMG_W},${y * IMG_H}`).join(' ');
+    poly.setAttribute('points', pts);
+    overlay.appendChild(poly);
+    districtPolys[di] = poly;
+  });
+
+  // Place markers and labels
+  data.districts.forEach((d, di) => {
+    d.places.forEach(p => {
+      if (p.x === undefined) return;
+      const m = document.createElement('div');
+      m.className = 'place-marker';
+      m.style.left = (p.x * IMG_W) + 'px';
+      m.style.top = (p.y * IMG_H) + 'px';
+      wrapper.appendChild(m);
+      markers[p.id] = m;
+
+      const lbl = document.createElement('div');
+      lbl.className = 'place-label';
+      lbl.textContent = p.name;
+      lbl.style.left = (p.x * IMG_W) + 'px';
+      lbl.style.top = (p.y * IMG_H) + 'px';
+      wrapper.appendChild(lbl);
+      labels[p.id] = lbl;
+    });
+  });
+}
+
+// Highlight helpers
+function clearHighlights() {
+  Object.values(districtPolys).forEach(p => p.classList.remove('highlight'));
+  Object.values(markers).forEach(m => m.classList.remove('highlight'));
+  Object.values(labels).forEach(l => l.classList.remove('visible'));
+}
+
+function highlightDistrict(di) {
+  clearHighlights();
+  if (districtPolys[di]) districtPolys[di].classList.add('highlight');
+  // Also highlight all places in this district
+  const d = data.districts[di];
+  d.places.forEach(p => {
+    if (markers[p.id]) markers[p.id].classList.add('highlight');
+    if (labels[p.id]) labels[p.id].classList.add('visible');
+  });
+}
+
+function highlightPlace(place) {
+  clearHighlights();
+  if (markers[place.id]) markers[place.id].classList.add('highlight');
+  if (labels[place.id]) labels[place.id].classList.add('visible');
+}
+
+// Pan to a location
+function panTo(x, y) {
+  const rect = container.getBoundingClientRect();
+  panX = rect.width / 2 - x * IMG_W * scale;
+  panY = rect.height / 2 - y * IMG_H * scale;
+  applyTransform();
+}
+
+// Search
+function doSearch(query) {
+  if (!data || !query.trim()) {
+    resultsEl.classList.remove('open');
+    return;
+  }
+  const q = query.toLowerCase();
+  const items = [];
+
+  data.districts.forEach((d, di) => {
+    if (d.name.toLowerCase().includes(q)) {
+      items.push({ type: 'district', district: d, di });
+    }
+    d.places.forEach(p => {
+      if (p.name.toLowerCase().includes(q)) {
+        items.push({ type: 'place', place: p, district: d, di });
+      }
+    });
+  });
+
+  resultsEl.innerHTML = '';
+  if (items.length === 0) {
+    resultsEl.classList.remove('open');
+    return;
+  }
+
+  items.forEach(item => {
+    const el = document.createElement('div');
+    el.className = 'result-item';
+    if (item.type === 'district') {
+      el.classList.add('is-district');
+      el.textContent = item.district.name;
+      el.addEventListener('mouseenter', () => highlightDistrict(item.di));
+      el.addEventListener('click', () => {
+        if (item.district.polygon) {
+          // Center on polygon centroid
+          const cx = item.district.polygon.reduce((s, p) => s + p[0], 0) / item.district.polygon.length;
+          const cy = item.district.polygon.reduce((s, p) => s + p[1], 0) / item.district.polygon.length;
+          panTo(cx, cy);
+        }
+      });
+    } else {
+      el.innerHTML = item.place.name + `<span class="district-tag">${item.district.name}</span>`;
+      el.addEventListener('mouseenter', () => highlightPlace(item.place));
+      el.addEventListener('click', () => {
+        panTo(item.place.x, item.place.y);
+      });
+    }
+    resultsEl.appendChild(el);
+  });
+
+  resultsEl.classList.add('open');
+}
+
+searchInput.addEventListener('input', (e) => doSearch(e.target.value));
+searchInput.addEventListener('focus', () => { if (searchInput.value.trim()) doSearch(searchInput.value); });
+
+resultsEl.addEventListener('mouseleave', clearHighlights);
+
+// Close results when clicking outside
+document.addEventListener('mousedown', (e) => {
+  if (!e.target.closest('#search-bar')) {
+    resultsEl.classList.remove('open');
+    clearHighlights();
+  }
+});
+
+// Pan & zoom
+function applyTransform() {
+  wrapper.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+}
+
+img.onload = () => {
+  const rect = container.getBoundingClientRect();
+  scale = Math.min(rect.width / IMG_W, rect.height / IMG_H);
+  panX = (rect.width - IMG_W * scale) / 2;
+  panY = (rect.height - IMG_H * scale) / 2;
+  applyTransform();
+};
+
+container.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  isDragging = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  panStartX = panX;
+  panStartY = panY;
+  container.classList.add('dragging');
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  panX = panStartX + (e.clientX - dragStartX);
+  panY = panStartY + (e.clientY - dragStartY);
+  applyTransform();
+});
+
+window.addEventListener('mouseup', () => {
+  isDragging = false;
+  container.classList.remove('dragging');
+});
+
+container.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = container.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const zoom = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+  const newScale = Math.min(Math.max(scale * zoom, 0.1), 10);
+  panX = mx - (mx - panX) * (newScale / scale);
+  panY = my - (my - panY) * (newScale / scale);
+  scale = newScale;
+  applyTransform();
+}, { passive: false });
+
+// Keyboard: Escape clears search
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    searchInput.value = '';
+    searchInput.blur();
+    resultsEl.classList.remove('open');
+    clearHighlights();
+  }
+});
+</script>
+</body>
+</html>
