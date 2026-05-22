@@ -14,6 +14,7 @@
 - [ ] Search: Allow searching by district to show all items in district, should be lowest priority only after only after the search is narrowed down to the district, so the top item in the dropdown is the district itself, and the rest of the items are the places in that district. So we can get a quick glance at what a neighborhood has in it
 - [ ] Allow searching for the lakes, rivers, fields that have labels
 - [ ] Setup SEO stuff
+- [ ] Setup cache busting
 
 ## Data
 
