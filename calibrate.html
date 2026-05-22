@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dol-Makjar Map Calibration</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: system-ui, sans-serif; display: flex; height: 100vh; overflow: hidden; background: #1a1a1a; color: #ddd; }
+
+#sidebar {
+  width: 320px; min-width: 320px; background: #222; border-right: 1px solid #444;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#sidebar h2 { padding: 12px; font-size: 14px; border-bottom: 1px solid #444; }
+
+#mode-tabs {
+  display: flex; border-bottom: 1px solid #444;
+}
+#mode-tabs button {
+  flex: 1; padding: 8px; background: #333; border: none; color: #aaa; cursor: pointer; font-size: 13px;
+}
+#mode-tabs button.active { background: #444; color: #fff; }
+
+#place-list {
+  flex: 1; overflow-y: auto; font-size: 13px;
+}
+.district-group { border-bottom: 1px solid #333; }
+.district-header {
+  padding: 6px 12px; background: #2a2a2a; font-weight: bold; font-size: 12px;
+  color: #888; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.district-header.has-polygon { color: #6a6; }
+.place-item {
+  padding: 4px 12px 4px 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+}
+.place-item:hover { background: #333; }
+.place-item.active { background: #335; color: #8af; }
+.place-item.done { color: #6a6; }
+.place-item .coords { font-size: 11px; color: #666; }
+
+.district-row {
+  padding: 4px 12px; display: flex; justify-content: space-between; align-items: center;
+}
+.district-row .name { flex: 1; }
+.district-row .info { font-size: 11px; color: #666; margin-right: 8px; }
+.district-row.done .name { color: #6a6; }
+.district-row.editing { background: #335; }
+.district-row.editing .name { color: #8af; }
+.btn-sm {
+  padding: 2px 8px; background: #444; border: 1px solid #555; color: #ddd;
+  cursor: pointer; border-radius: 3px; font-size: 11px;
+}
+.btn-sm:hover { background: #555; }
+.btn-sm.btn-done { background: #363; border-color: #484; }
+.btn-sm.btn-done:hover { background: #474; }
+.btn-sm.btn-clear { background: #633; border-color: #844; }
+.btn-sm.btn-clear:hover { background: #744; }
+
+#controls {
+  padding: 8px; border-top: 1px solid #444; display: flex; flex-direction: column; gap: 6px;
+}
+#controls button {
+  padding: 6px 10px; background: #444; border: 1px solid #555; color: #ddd;
+  cursor: pointer; border-radius: 3px; font-size: 13px;
+}
+#controls button:hover { background: #555; }
+#controls .info { font-size: 11px; color: #888; text-align: center; }
+
+#map-container {
+  flex: 1; overflow: hidden; cursor: grab; position: relative;
+}
+#map-container.dragging { cursor: grabbing; }
+#map-container.editing { cursor: crosshair; }
+
+#map-wrapper {
+  position: absolute; transform-origin: 0 0;
+}
+#map-img { display: block; }
+
+.marker {
+  position: absolute; width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(255, 80, 80, 0.8); border: 2px solid #fff;
+  transform: translate(-50%, -50%); pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: bold; color: #fff;
+}
+
+.poly-point {
+  position: absolute; width: 14px; height: 14px; border-radius: 50%;
+  background: rgba(80, 180, 255, 0.8); border: 2px solid #fff;
+  transform: translate(-50%, -50%); pointer-events: auto; cursor: grab;
+}
+.poly-point:hover { background: rgba(255, 200, 80, 0.9); }
+.poly-point.dragging-point { cursor: grabbing; background: rgba(255, 200, 80, 1); }
+
+svg#poly-overlay {
+  position: absolute; top: 0; left: 0; pointer-events: none;
+}
+svg#poly-overlay polygon {
+  fill: rgba(80, 180, 255, 0.15); stroke: rgba(80, 180, 255, 0.7); stroke-width: 2;
+}
+svg#poly-overlay polygon.active-poly {
+  fill: rgba(80, 180, 255, 0.25); stroke: rgba(80, 180, 255, 0.9); stroke-width: 2; stroke-dasharray: 6 3;
+}
+svg#poly-overlay polyline {
+  fill: none; stroke: rgba(80, 180, 255, 0.7); stroke-width: 2; stroke-dasharray: 6 3;
+}
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>Calibration Tool</h2>
+  <div id="mode-tabs">
+    <button class="active" data-mode="point">Points</button>
+    <button data-mode="polygon">Polygons</button>
+  </div>
+  <div id="place-list"></div>
+  <div id="controls">
+    <div class="info" id="status">Click map to place marker</div>
+    <button id="btn-undo">Undo Last</button>
+    <button id="btn-copy">Copy JSON</button>
+    <button id="btn-load">Load from places.json</button>
+  </div>
+</div>
+
+<div id="map-container">
+  <div id="map-wrapper">
+    <img id="map-img" src="original-map.jpg" draggable="false">
+    <svg id="poly-overlay"></svg>
+  </div>
+</div>
+
+<script>
+const IMG_W = 3600, IMG_H = 5400;
+let data = null;
+let mode = 'point'; // 'point' or 'polygon'
+let currentPlaceIdx = 0;
+let allPlaces = [];
+
+// Polygon editing state
+let editingDistrictIdx = -1; // -1 means not editing any district
+let polyPoints = [];
+
+// Pan/zoom state
+let scale = 1, panX = 0, panY = 0;
+let isDragging = false, dragStartX, dragStartY, panStartX, panStartY;
+
+// Poly point drag state
+let draggingPointIdx = -1;
+let isDraggingPoint = false;
+
+const container = document.getElementById('map-container');
+const wrapper = document.getElementById('map-wrapper');
+const img = document.getElementById('map-img');
+const polyOverlay = document.getElementById('poly-overlay');
+const placeList = document.getElementById('place-list');
+const statusEl = document.getElementById('status');
+
+fetch('places.json').then(r => r.json()).then(d => {
+  data = d;
+  buildFlatList();
+  renderSidebar();
+  updateStatus();
+});
+
+function buildFlatList() {
+  allPlaces = [];
+  data.districts.forEach((d, di) => {
+    d.places.forEach((p, pi) => {
+      allPlaces.push({ districtIdx: di, placeIdx: pi, place: p });
+    });
+  });
+}
+
+function isEditing() {
+  return mode === 'polygon' && editingDistrictIdx >= 0;
+}
+
+function startEditing(di) {
+  editingDistrictIdx = di;
+  const d = data.districts[di];
+  polyPoints = d.polygon ? d.polygon.map(p => p.slice()) : [];
+  container.classList.add('editing');
+  renderSidebar();
+  renderOverlays();
+  updateStatus();
+}
+
+function stopEditing() {
+  if (editingDistrictIdx >= 0) {
+    // Save the polygon
+    if (polyPoints.length >= 3) {
+      data.districts[editingDistrictIdx].polygon = polyPoints.map(p => p.slice());
+    }
+  }
+  editingDistrictIdx = -1;
+  polyPoints = [];
+  container.classList.remove('editing');
+  renderSidebar();
+  renderOverlays();
+  updateStatus();
+}
+
+function clearPolygon(di) {
+  delete data.districts[di].polygon;
+  if (editingDistrictIdx === di) {
+    polyPoints = [];
+  }
+  renderSidebar();
+  renderOverlays();
+  updateStatus();
+}
+
+function renderSidebar() {
+  placeList.innerHTML = '';
+  if (mode === 'point') {
+    data.districts.forEach((d, di) => {
+      const group = document.createElement('div');
+      group.className = 'district-group';
+      const header = document.createElement('div');
+      header.className = 'district-header' + (d.polygon ? ' has-polygon' : '');
+      header.textContent = d.name;
+      group.appendChild(header);
+      d.places.forEach((p, pi) => {
+        const item = document.createElement('div');
+        item.className = 'place-item';
+        const flatIdx = allPlaces.findIndex(a => a.place === p);
+        if (flatIdx === currentPlaceIdx) item.classList.add('active');
+        if (p.x !== undefined) item.classList.add('done');
+        const name = document.createElement('span');
+        name.textContent = `${p.id}. ${p.name}`;
+        item.appendChild(name);
+        if (p.x !== undefined) {
+          const coords = document.createElement('span');
+          coords.className = 'coords';
+          coords.textContent = `${p.x.toFixed(4)}, ${p.y.toFixed(4)}`;
+          item.appendChild(coords);
+        }
+        item.addEventListener('click', () => {
+          currentPlaceIdx = flatIdx;
+          renderSidebar();
+          updateStatus();
+        });
+        group.appendChild(item);
+      });
+      placeList.appendChild(group);
+    });
+    const active = placeList.querySelector('.active');
+    if (active) active.scrollIntoView({ block: 'nearest' });
+  } else {
+    // Polygon mode - show districts with edit/done buttons
+    data.districts.forEach((d, di) => {
+      const row = document.createElement('div');
+      row.className = 'district-row';
+      if (d.polygon) row.classList.add('done');
+      if (editingDistrictIdx === di) row.classList.add('editing');
+
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = d.name;
+      row.appendChild(name);
+
+      if (editingDistrictIdx === di) {
+        // Currently editing this one
+        const info = document.createElement('span');
+        info.className = 'info';
+        info.textContent = `${polyPoints.length} pts`;
+        row.appendChild(info);
+
+        const doneBtn = document.createElement('button');
+        doneBtn.className = 'btn-sm btn-done';
+        doneBtn.textContent = 'Done';
+        doneBtn.addEventListener('click', (e) => { e.stopPropagation(); stopEditing(); });
+        row.appendChild(doneBtn);
+      } else if (editingDistrictIdx < 0) {
+        // Not editing anything — show edit/clear buttons
+        if (d.polygon) {
+          const info = document.createElement('span');
+          info.className = 'info';
+          info.textContent = `${d.polygon.length} pts`;
+          row.appendChild(info);
+        }
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn-sm';
+        editBtn.textContent = d.polygon ? 'Edit' : 'Draw';
+        editBtn.addEventListener('click', (e) => { e.stopPropagation(); startEditing(di); });
+        row.appendChild(editBtn);
+
+        if (d.polygon) {
+          const clearBtn = document.createElement('button');
+          clearBtn.className = 'btn-sm btn-clear';
+          clearBtn.textContent = 'X';
+          clearBtn.style.marginLeft = '4px';
+          clearBtn.addEventListener('click', (e) => { e.stopPropagation(); clearPolygon(di); });
+          row.appendChild(clearBtn);
+        }
+      }
+
+      placeList.appendChild(row);
+    });
+  }
+}
+
+function updateStatus() {
+  if (mode === 'point') {
+    if (currentPlaceIdx < allPlaces.length) {
+      const p = allPlaces[currentPlaceIdx].place;
+      statusEl.textContent = `Next: #${p.id} ${p.name}`;
+    } else {
+      statusEl.textContent = 'All places marked!';
+    }
+  } else if (isEditing()) {
+    const d = data.districts[editingDistrictIdx];
+    statusEl.textContent = `Editing ${d.name}: ${polyPoints.length} pts — click to add, drag to move`;
+  } else {
+    statusEl.textContent = 'Click "Draw" to start a polygon';
+  }
+}
+
+// Transform helpers
+function applyTransform() {
+  wrapper.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+  polyOverlay.setAttribute('width', IMG_W);
+  polyOverlay.setAttribute('height', IMG_H);
+}
+
+function screenToImage(sx, sy) {
+  const rect = container.getBoundingClientRect();
+  const x = (sx - rect.left - panX) / scale;
+  const y = (sy - rect.top - panY) / scale;
+  return [x / IMG_W, y / IMG_H];
+}
+
+// Initial fit
+img.onload = () => {
+  const rect = container.getBoundingClientRect();
+  scale = Math.min(rect.width / IMG_W, rect.height / IMG_H);
+  panX = (rect.width - IMG_W * scale) / 2;
+  panY = (rect.height - IMG_H * scale) / 2;
+  applyTransform();
+  renderOverlays();
+};
+
+// Pan & point dragging
+container.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+
+  // Check if mousedown is on a poly-point dot (only when editing)
+  if (isEditing() && e.target.classList.contains('poly-point')) {
+    const idx = parseInt(e.target.dataset.idx, 10);
+    if (!isNaN(idx)) {
+      isDraggingPoint = true;
+      draggingPointIdx = idx;
+      e.target.classList.add('dragging-point');
+      e.preventDefault();
+      return;
+    }
+  }
+
+  isDragging = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  panStartX = panX;
+  panStartY = panY;
+  container.classList.add('dragging');
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (isDraggingPoint) {
+    const [rx, ry] = screenToImage(e.clientX, e.clientY);
+    polyPoints[draggingPointIdx] = [
+      Math.max(0, Math.min(1, rx)),
+      Math.max(0, Math.min(1, ry))
+    ];
+    renderOverlays();
+    return;
+  }
+  if (!isDragging) return;
+  panX = panStartX + (e.clientX - dragStartX);
+  panY = panStartY + (e.clientY - dragStartY);
+  applyTransform();
+});
+
+window.addEventListener('mouseup', (e) => {
+  if (isDraggingPoint) {
+    isDraggingPoint = false;
+    draggingPointIdx = -1;
+    renderOverlays();
+    updateStatus();
+    return;
+  }
+  if (!isDragging) return;
+  const dx = Math.abs(e.clientX - dragStartX);
+  const dy = Math.abs(e.clientY - dragStartY);
+  isDragging = false;
+  container.classList.remove('dragging');
+  if (dx < 4 && dy < 4) {
+    handleMapClick(e);
+  }
+});
+
+// Zoom
+container.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = container.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const zoom = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+  const newScale = Math.min(Math.max(scale * zoom, 0.1), 10);
+  panX = mx - (mx - panX) * (newScale / scale);
+  panY = my - (my - panY) * (newScale / scale);
+  scale = newScale;
+  applyTransform();
+}, { passive: false });
+
+// Map click — simple, no delays
+function handleMapClick(e) {
+  const [rx, ry] = screenToImage(e.clientX, e.clientY);
+  if (rx < 0 || rx > 1 || ry < 0 || ry > 1) return;
+
+  if (mode === 'point') {
+    if (currentPlaceIdx >= allPlaces.length) return;
+    const entry = allPlaces[currentPlaceIdx];
+    entry.place.x = rx;
+    entry.place.y = ry;
+    currentPlaceIdx++;
+    while (currentPlaceIdx < allPlaces.length && allPlaces[currentPlaceIdx].place.x !== undefined) {
+      currentPlaceIdx++;
+    }
+    renderSidebar();
+    renderOverlays();
+    updateStatus();
+  } else if (isEditing()) {
+    // Add point to current polygon
+    polyPoints.push([rx, ry]);
+    renderOverlays();
+    updateStatus();
+  }
+}
+
+// Render markers and polygons
+function renderOverlays() {
+  wrapper.querySelectorAll('.marker, .poly-point').forEach(el => el.remove());
+
+  // Place markers
+  allPlaces.forEach(({ place }) => {
+    if (place.x === undefined) return;
+    const m = document.createElement('div');
+    m.className = 'marker';
+    m.style.left = (place.x * IMG_W) + 'px';
+    m.style.top = (place.y * IMG_H) + 'px';
+    m.textContent = place.id;
+    wrapper.appendChild(m);
+  });
+
+  // SVG polygons
+  polyOverlay.innerHTML = '';
+
+  // All saved district polygons (skip the one being edited)
+  data.districts.forEach((d, di) => {
+    if (!d.polygon) return;
+    if (di === editingDistrictIdx) return;
+    const pts = d.polygon.map(([x, y]) => `${x * IMG_W},${y * IMG_H}`).join(' ');
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    poly.setAttribute('points', pts);
+    polyOverlay.appendChild(poly);
+  });
+
+  // Active editing polygon
+  if (isEditing() && polyPoints.length > 0) {
+    // Draggable dots
+    polyPoints.forEach(([x, y], i) => {
+      const dot = document.createElement('div');
+      dot.className = 'poly-point';
+      dot.dataset.idx = i;
+      dot.style.left = (x * IMG_W) + 'px';
+      dot.style.top = (y * IMG_H) + 'px';
+      wrapper.appendChild(dot);
+    });
+
+    const pts = polyPoints.map(([x, y]) => `${x * IMG_W},${y * IMG_H}`).join(' ');
+    if (polyPoints.length >= 3) {
+      const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      poly.setAttribute('points', pts);
+      poly.classList.add('active-poly');
+      polyOverlay.appendChild(poly);
+    } else if (polyPoints.length > 1) {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      line.setAttribute('points', pts);
+      polyOverlay.appendChild(line);
+    }
+  }
+}
+
+// Mode tabs
+document.querySelectorAll('#mode-tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (isEditing()) stopEditing(); // save current polygon first
+    document.querySelectorAll('#mode-tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    mode = btn.dataset.mode;
+    container.classList.toggle('editing', false);
+    renderSidebar();
+    renderOverlays();
+    updateStatus();
+  });
+});
+
+// Undo
+document.getElementById('btn-undo').addEventListener('click', () => {
+  if (mode === 'point') {
+    for (let i = currentPlaceIdx - 1; i >= 0; i--) {
+      if (allPlaces[i].place.x !== undefined) {
+        delete allPlaces[i].place.x;
+        delete allPlaces[i].place.y;
+        currentPlaceIdx = i;
+        break;
+      }
+    }
+  } else if (isEditing()) {
+    if (polyPoints.length > 0) {
+      polyPoints.pop();
+    }
+  }
+  renderSidebar();
+  renderOverlays();
+  updateStatus();
+});
+
+// Copy JSON
+document.getElementById('btn-copy').addEventListener('click', () => {
+  if (isEditing()) stopEditing(); // save first
+  const output = JSON.stringify(data, null, 2);
+  navigator.clipboard.writeText(output).then(() => {
+    statusEl.textContent = 'Copied to clipboard!';
+    setTimeout(updateStatus, 1500);
+  });
+});
+
+// Load from places.json
+document.getElementById('btn-load').addEventListener('click', () => {
+  fetch('places.json').then(r => r.json()).then(d => {
+    data = d;
+    buildFlatList();
+    editingDistrictIdx = -1;
+    polyPoints = [];
+    container.classList.remove('editing');
+    currentPlaceIdx = allPlaces.findIndex(a => a.place.x === undefined);
+    if (currentPlaceIdx === -1) currentPlaceIdx = allPlaces.length;
+    renderSidebar();
+    renderOverlays();
+    statusEl.textContent = 'Reloaded from places.json';
+    setTimeout(updateStatus, 1500);
+  });
+});
+</script>
+</body>
+</html>
