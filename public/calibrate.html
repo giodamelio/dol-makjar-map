@@ -72,6 +72,7 @@ body { font-family: system-ui, sans-serif; display: flex; height: 100vh; overflo
   flex: 1; overflow: hidden; cursor: grab; position: relative;
 }
 #map-container.dragging { cursor: grabbing; }
+#map-container.placing { cursor: crosshair; }
 #map-container.editing { cursor: crosshair; }
 
 #map-wrapper {
@@ -486,6 +487,9 @@ function renderSidebar() {
 }
 
 function updateStatus() {
+  // Show crosshair when placing points
+  container.classList.toggle('placing', mode === 'point' && currentPlaceIdx < allPlaces.length);
+
   if (mode === 'point') {
     if (currentPlaceIdx < allPlaces.length) {
       const p = allPlaces[currentPlaceIdx].place;
