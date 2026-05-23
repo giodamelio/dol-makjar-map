@@ -278,8 +278,20 @@
 											fillOpacity: 0,
 											opacity: 0,
 											weight: 2,
-											interactive: false
+											interactive: true
 											}).addTo(map);
+											circle.on('click', () => {
+												selectItem({ type: 'place', place: p, district: d, di }, true);
+											});
+											circle.on('mouseover', () => {
+												if (!currentSelection || currentSelection.place?.id !== p.id) {
+													highlightPlace(p, d);
+												}
+											});
+											circle.on('mouseout', () => {
+												clearHighlights();
+												if (currentSelection) showSelectionHighlight();
+											});
 											placeMarkers[p.id] = circle;
 											
 											});
