@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Interactive map viewer for the city of Dol-Makjar from Critical Role Campaign 4. Displays a 3600x5400 JPG map image with pan/zoom, place search, district polygon overlays, and URL hash state for deep linking.
+Interactive map viewer for the city of Dol-Makjar from Critical Role Campaign 4. Displays a JPG map image with pan/zoom, place search, district polygon overlays, and URL hash state for deep linking. Supports versioned map data.
 
 ## Tech Stack
 
@@ -13,14 +13,23 @@ Interactive map viewer for the city of Dol-Makjar from Critical Role Campaign 4.
 ## Files
 
 - `index.html` — Map viewer (Leaflet + inline CSS/JS). All application code is in this single file.
-- `calibrate.html` — Coordinate editing tool for placing point/polygon coordinates. Uses vanilla JS (not Leaflet) with CSS transforms for pan/zoom. Has Point mode and Polygon mode with Draw/Edit/Done/Clear buttons.
-- `places.json` — All locations (65 places), coordinates (0-1 fractions), district names (16 districts), and district polygon boundaries.
-- `original-map.jpg` — Source map image (3600x5400 JPEG)
+- `calibrate.html` — Coordinate editing tool for placing point/polygon coordinates. Uses vanilla JS (not Leaflet) with CSS transforms for pan/zoom. Has Point mode and Polygon mode with Draw/Edit/Done/Clear buttons. Uses Chrome File System Access API (`showDirectoryPicker`) to open map version directories and save edits directly to disk.
+- `maps/manifest.json` — Lists available map versions and which is the latest.
+- `maps/v1/` — Map version 1: `map.jpg` (3600x5400) + `places.json`
+- `maps/v2/` — Map version 2: `map.jpg` + `places.json` (in progress)
 - `TODO.md` — Feature backlog
+
+## Map Versioning
+
+Each map version is a directory under `public/maps/` containing `map.jpg` and `places.json`. The manifest at `public/maps/manifest.json` lists versions and which is latest.
+
+The viewer (`index.html`) loads `maps/manifest.json` on startup, uses the latest version by default. To override for debugging, set `localStorage.setItem('mapVersion', 'v1')` in the browser console.
+
+The calibrate tool (`calibrate.html`) uses Chrome's File System Access API — on load it prompts to open a map version directory, then reads/writes files directly. Requires Chrome/Edge (not Firefox).
 
 ## Coordinate System
 
-Places in `places.json` use 0-1 fractional coordinates relative to the image dimensions. Conversion to Leaflet coordinates:
+Places in `places.json` use 0-1 fractional coordinates relative to the image dimensions. `IMG_W` and `IMG_H` are derived from the loaded image's `naturalWidth`/`naturalHeight` at runtime. Conversion to Leaflet coordinates:
 
 ```js
 function toLatLng(x, y) {

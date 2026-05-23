@@ -132,12 +132,38 @@ svg#poly-overlay polyline {
   background: rgba(255, 200, 80, 0.08); border: 1px solid transparent;
 }
 .legend-move:hover { border-color: rgba(255, 200, 80, 0.4); }
+
+#open-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: #1a1a1a; display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+#open-overlay-content {
+  text-align: center; max-width: 400px;
+}
+#open-overlay-content h2 { margin-bottom: 12px; font-size: 20px; }
+#open-overlay-content p { margin-bottom: 16px; color: #aaa; font-size: 14px; }
+#open-overlay-content code { background: #333; padding: 2px 6px; border-radius: 3px; }
+#btn-open-dir {
+  padding: 12px 24px; background: #446; border: 1px solid #668; color: #fff;
+  cursor: pointer; border-radius: 6px; font-size: 16px;
+}
+#btn-open-dir:hover { background: #558; }
 </style>
 </head>
 <body>
 
-<div id="sidebar">
-  <h2>Calibration Tool</h2>
+<div id="open-overlay">
+  <div id="open-overlay-content">
+    <h2>Calibration Tool</h2>
+    <p>Open a map version directory containing <code>map.jpg</code> and <code>places.json</code>.</p>
+    <button id="btn-open-dir">Open Map Directory</button>
+    <p id="open-error" style="color: #f88; display: none;"></p>
+  </div>
+</div>
+
+<div id="sidebar" style="display: none;">
+  <h2 id="sidebar-title">Calibration Tool</h2>
   <div id="mode-tabs">
     <button class="active" data-mode="point">Points</button>
     <button data-mode="polygon">Polygons</button>
@@ -147,20 +173,22 @@ svg#poly-overlay polyline {
   <div id="controls">
     <div class="info" id="status">Click map to place marker</div>
     <button id="btn-undo">Undo Last</button>
+    <button id="btn-save">Save</button>
     <button id="btn-copy">Copy JSON</button>
-    <button id="btn-load">Load from places.json</button>
+    <button id="btn-load">Reload from disk</button>
   </div>
 </div>
 
-<div id="map-container">
+<div id="map-container" style="display: none;">
   <div id="map-wrapper">
-    <img id="map-img" src="original-map.jpg" draggable="false">
+    <img id="map-img" draggable="false">
     <svg id="poly-overlay"></svg>
   </div>
 </div>
 
 <script>
-const IMG_W = 3600, IMG_H = 5400;
+let IMG_W, IMG_H;
+let dirHandle = null;
 let data = null;
 let mode = 'point'; // 'point' or 'polygon'
 let currentPlaceIdx = 0;
@@ -219,13 +247,69 @@ const polyOverlay = document.getElementById('poly-overlay');
 const placeList = document.getElementById('place-list');
 const statusEl = document.getElementById('status');
 
-fetch('places.json').then(r => r.json()).then(d => {
-  data = d;
+async function openDirectory(handle) {
+  dirHandle = handle || await window.showDirectoryPicker();
+  const errorEl = document.getElementById('open-error');
+
+  try {
+    // Load image
+    const imgFileHandle = await dirHandle.getFileHandle('map.jpg');
+    const imgFile = await imgFileHandle.getFile();
+    img.src = URL.createObjectURL(imgFile);
+
+    // Load places.json
+    const jsonFileHandle = await dirHandle.getFileHandle('places.json');
+    const jsonFile = await jsonFileHandle.getFile();
+    data = JSON.parse(await jsonFile.text());
+
+    buildFlatList();
+    loadLegendFromData();
+
+    // Show the UI
+    document.getElementById('open-overlay').style.display = 'none';
+    document.getElementById('sidebar').style.display = '';
+    document.getElementById('map-container').style.display = '';
+    document.getElementById('sidebar-title').textContent = `Calibration — ${dirHandle.name}`;
+
+    renderSidebar();
+    updateStatus();
+  } catch (err) {
+    if (err.name === 'AbortError') return; // user cancelled picker
+    errorEl.textContent = `Error: ${err.message}`;
+    errorEl.style.display = '';
+  }
+}
+
+async function saveData() {
+  if (!dirHandle) return;
+  if (isEditing()) stopEditing(); // save polygon first
+  const fileHandle = await dirHandle.getFileHandle('places.json', { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(JSON.stringify(data, null, 2) + '\n');
+  await writable.close();
+  statusEl.textContent = 'Saved to disk!';
+  setTimeout(updateStatus, 1500);
+}
+
+async function reloadFromDisk() {
+  if (!dirHandle) return;
+  const jsonFileHandle = await dirHandle.getFileHandle('places.json');
+  const jsonFile = await jsonFileHandle.getFile();
+  data = JSON.parse(await jsonFile.text());
   buildFlatList();
   loadLegendFromData();
+  editingDistrictIdx = -1;
+  polyPoints = [];
+  container.classList.remove('editing');
+  currentPlaceIdx = allPlaces.findIndex(a => a.place.x === undefined);
+  if (currentPlaceIdx === -1) currentPlaceIdx = allPlaces.length;
   renderSidebar();
-  updateStatus();
-});
+  renderOverlays();
+  statusEl.textContent = 'Reloaded from disk';
+  setTimeout(updateStatus, 1500);
+}
+
+document.getElementById('btn-open-dir').addEventListener('click', () => openDirectory());
 
 function buildFlatList() {
   allPlaces = [];
@@ -440,8 +524,10 @@ function screenToImage(sx, sy) {
   return [x / IMG_W, y / IMG_H];
 }
 
-// Initial fit
+// Fit image on load — also derives IMG_W/IMG_H from the loaded image
 img.onload = () => {
+  IMG_W = img.naturalWidth;
+  IMG_H = img.naturalHeight;
   const rect = container.getBoundingClientRect();
   scale = Math.min(rect.width / IMG_W, rect.height / IMG_H);
   panX = (rect.width - IMG_W * scale) / 2;
@@ -846,6 +932,9 @@ document.getElementById('btn-undo').addEventListener('click', () => {
   updateStatus();
 });
 
+// Save to disk
+document.getElementById('btn-save').addEventListener('click', () => saveData());
+
 // Copy JSON
 document.getElementById('btn-copy').addEventListener('click', () => {
   if (isEditing()) stopEditing(); // save first
@@ -856,23 +945,8 @@ document.getElementById('btn-copy').addEventListener('click', () => {
   });
 });
 
-// Load from places.json
-document.getElementById('btn-load').addEventListener('click', () => {
-  fetch('places.json').then(r => r.json()).then(d => {
-    data = d;
-    buildFlatList();
-    loadLegendFromData();
-    editingDistrictIdx = -1;
-    polyPoints = [];
-    container.classList.remove('editing');
-    currentPlaceIdx = allPlaces.findIndex(a => a.place.x === undefined);
-    if (currentPlaceIdx === -1) currentPlaceIdx = allPlaces.length;
-    renderSidebar();
-    renderOverlays();
-    statusEl.textContent = 'Reloaded from places.json';
-    setTimeout(updateStatus, 1500);
-  });
-});
+// Reload from disk
+document.getElementById('btn-load').addEventListener('click', () => reloadFromDisk());
 </script>
 </body>
 </html>

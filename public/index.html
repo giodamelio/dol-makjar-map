@@ -13,7 +13,7 @@
 		<meta name="twitter:title" content="Dol-Makjar · Interactive Map">
 		<meta name="twitter:description" content="Interactive map of the city of Dol-Makjar from Critical Role Campaign 4.">
 		<meta name="twitter:image" content="/icon.png">
-		<link rel="preload" href="/places.json" as="fetch" crossorigin>
+		<!-- preload added dynamically after version is resolved -->
 		<link rel="icon" type="image/png" href="/icon.png">
 		<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
 		<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
@@ -205,9 +205,9 @@
 		<div id="map"></div>
 
 		<script>
-			const IMG_W = 3600, IMG_H = 5400;
+			let IMG_W, IMG_H;
 			let data = null;
-			
+
 			// Leaflet map with simple CRS (pixel coordinates)
 			const map = L.map('map', {
 				crs: L.CRS.Simple,
@@ -217,21 +217,17 @@
 				zoomDelta: 0.5,
 				attributionControl: false
 				});
-				
-				const bounds = [[0, 0], [IMG_H, IMG_W]];
-				L.imageOverlay('original-map.jpg', bounds).addTo(map);
-				map.fitBounds(bounds);
-				
+
 				// Convert places.json coords (0-1 fractions) to Leaflet coords
 				// Leaflet CRS.Simple uses [y, x] and y is inverted (0 at bottom)
 				function toLatLng(x, y) {
 					return [IMG_H * (1 - y), IMG_W * x];
 				}
-				
+
 				function polyToLatLngs(polygon) {
 					return polygon.map(([x, y]) => toLatLng(x, y));
 				}
-				
+
 				// Layers for highlights
 				const districtPolys = {};
 				const placeMarkers = {};
@@ -239,15 +235,31 @@
 				const searchInput = document.getElementById('search-input');
 				const resultsEl = document.getElementById('results');
 				const selectionEl = document.getElementById('selection');
-				
-				fetch('places.json').then(r => r.json()).then(d => {
-					data = d;
+
+				// Load versioned map data
+				(async () => {
+					const manifest = await fetch('maps/manifest.json').then(r => r.json());
+					const version = localStorage.getItem('mapVersion') || manifest.latest;
+					const basePath = `maps/${version}`;
+
+					// Load image to get dimensions
+					const img = new Image();
+					img.src = `${basePath}/map.jpg`;
+					await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; });
+					IMG_W = img.naturalWidth;
+					IMG_H = img.naturalHeight;
+
+					const bounds = [[0, 0], [IMG_H, IMG_W]];
+					L.imageOverlay(`${basePath}/map.jpg`, bounds).addTo(map);
+					map.fitBounds(bounds);
+
+					data = await fetch(`${basePath}/places.json`).then(r => r.json());
 					buildOverlays();
 					buildLegendOverlays();
 					// Check URL hash for initial selection
 					const hashItem = resolveHash();
 					if (hashItem) selectItem(hashItem, true);
-					});
+				})();
 					
 					function buildOverlays() {
 						// District polygons — invisible by default
